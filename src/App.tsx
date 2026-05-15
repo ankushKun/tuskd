@@ -292,21 +292,26 @@ function TopBar({ navigate }: { navigate: (path: string) => void }) {
 
   return (
     <header className="topbar">
-      <button className="brand" onClick={() => navigate("/forms")} aria-label="Open forms dashboard">
-        <span className="brand-mark">T</span>
-        <span>
+      <button className="brand" onClick={() => navigate("/forms")} aria-label="TuskTable home">
+        <span className="brand-mark">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5z" />
+            <path d="M2 17l10 5 10-5" />
+            <path d="M2 12l10 5 10-5" />
+          </svg>
+        </span>
+        <span className="brand-text">
           <strong>TuskTable</strong>
-          <small>Sui Testnet + Walrus Testnet</small>
+          <small>Walrus-native forms</small>
         </span>
       </button>
       <div className="topbar-actions">
-        <div className="wallet-pill" title="Demo wallet address">
-          <Wallet size={16} />
-          <span>Demo</span>
-          <span className="wallet-address">{shortAddress(demoAddress())}</span>
+        <div className="wallet-pill" title="Demo session">
+          <span className="wallet-dot" />
+          <span className="wallet-label">{shortAddress(demoAddress())}</span>
         </div>
         <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme">
-          {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+          {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
         </button>
       </div>
     </header>
@@ -1139,24 +1144,24 @@ function FieldPreview({ field }: { field: Field }) {
 
 function PublicFormPreview({ schema }: { schema: FormSchema }) {
   return (
-    <div>
-      <div className="public-header">
-        <p className="eyebrow">Preview</p>
+    <div className="typeform-preview">
+      <div className="typeform-preview-header">
         <h1>{schema.title || "Untitled Form"}</h1>
-        <p>{schema.description}</p>
+        {schema.description ? <p>{schema.description}</p> : null}
       </div>
-      <div className="public-form">
-        {schema.fields.map(field => (
-           <ResponseField
+      <div className="typeform-preview-body">
+        {schema.fields.map((field, i) => (
+           <TypeformField
              key={field.id}
              field={field}
              value={undefined}
              onValue={() => {}}
              onFile={() => {}}
              onClearFile={() => {}}
+             index={i}
            />
         ))}
-        <button className="submit-bar">Submit feedback</button>
+        <button className="typeform-ok submit">Submit</button>
       </div>
     </div>
   );
@@ -1386,45 +1391,38 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
 
   return (
     <div className="public-form-page">
-      <div className="public-form-progress">
-        <div className="public-form-progress-track">
-          <motion.div
-            className="public-form-progress-fill"
-            initial={{ width: 0 }}
-            animate={{ width: `${requiredCount > 0 ? (requiredAnswered / requiredCount) * 100 : 0}%` }}
-            transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
-          />
-        </div>
+      {/* Step counter pill */}
+      <div className="public-form-meta">
+        <span className="step-pill">
+          {isSlides ? `${activeStep + 1} / ${totalFields}` : `${activeSchema.fields.length} questions`}
+        </span>
+        {activeSchema.encrypted && (
+          <span className="step-pill encrypted"><Lock size={12} /> Private</span>
+        )}
       </div>
-
-      <header className="public-form-header">
-        <h1>{activeSchema.title}</h1>
-        {activeSchema.description ? <p>{activeSchema.description}</p> : null}
-      </header>
 
       <main className="public-form-body">
         {isSlides ? (
           <div className="slides-container">
-            <div className="slides-meta">
-              <span className="slides-counter">{activeStep + 1} <span>/ {totalFields}</span></span>
-            </div>
-
             <AnimatePresence mode="wait" custom={direction}>
               <motion.div
                 key={activeStep}
                 custom={direction}
-                initial={{ y: direction > 0 ? 60 : -60, opacity: 0 }}
+                initial={{ y: direction > 0 ? 40 : -40, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
-                exit={{ y: direction > 0 ? -60 : 60, opacity: 0 }}
-                transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
+                exit={{ y: direction > 0 ? -40 : 40, opacity: 0 }}
+                transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
                 className="slides-question-wrapper"
               >
-                <ResponseField
+                <TypeformField
                   field={currentField}
                   value={values[currentField.id]}
                   file={files[currentField.id]}
                   error={errors[currentField.id]}
-                  onValue={(value) => setValues((current) => ({ ...current, [currentField.id]: value }))}
+                  onValue={(value) => {
+                    setValues((current) => ({ ...current, [currentField.id]: value }));
+                    setErrors((prev) => ({ ...prev, [currentField.id]: "" }));
+                  }}
                   onFile={(file) => setFiles((current) => ({ ...current, [currentField.id]: file }))}
                   onClearFile={() =>
                     setFiles((current) => {
@@ -1438,33 +1436,41 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
               </motion.div>
             </AnimatePresence>
 
-            <div className="slides-nav">
-              <button className="secondary" onClick={handlePrev} disabled={activeStep === 0 || busy}>
-                <ArrowLeft size={16} /> Back
-              </button>
-              {activeStep === totalFields - 1 ? (
-                <button className="primary" onClick={handleSubmit} disabled={busy}>
-                  {busy ? <Loader2 size={16} className="spin" /> : <Send size={16} />}
-                  Submit
+            <div className="typeform-nav">
+              {activeStep > 0 && (
+                <button className="typeform-nav-arrow" onClick={handlePrev} aria-label="Previous question">
+                  <ArrowUp size={20} />
+                </button>
+              )}
+              {activeStep < totalFields - 1 ? (
+                <button className="typeform-ok" onClick={handleNext}>
+                  OK
                 </button>
               ) : (
-                <button className="primary" onClick={handleNext}>
-                  Next <ArrowRight size={16} />
+                <button className="typeform-ok submit" onClick={handleSubmit} disabled={busy}>
+                  {busy ? <Loader2 size={18} className="spin" /> : "Submit"}
                 </button>
+              )}
+              {activeStep < totalFields - 1 && (
+                <span className="typeform-hint">
+                  press <kbd>Enter</kbd> ↵
+                </span>
               )}
             </div>
           </div>
         ) : (
           <div className="list-container">
             {activeSchema.fields.map((field, index) => (
-              <div key={field.id} id={`q-${field.id}`} className="question-card">
-                <span className="question-number">{index + 1}</span>
-                <ResponseField
+              <div key={field.id} id={`q-${field.id}`} className="typeform-question">
+                <TypeformField
                   field={field}
                   value={values[field.id]}
                   file={files[field.id]}
                   error={errors[field.id]}
-                  onValue={(value) => setValues((current) => ({ ...current, [field.id]: value }))}
+                  onValue={(value) => {
+                    setValues((current) => ({ ...current, [field.id]: value }));
+                    setErrors((prev) => ({ ...prev, [field.id]: "" }));
+                  }}
                   onFile={(file) => setFiles((current) => ({ ...current, [field.id]: file }))}
                   onClearFile={() =>
                     setFiles((current) => {
@@ -1477,39 +1483,34 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
                 />
               </div>
             ))}
-            <button className="public-submit-btn" onClick={handleSubmit} disabled={busy}>
-              {busy ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
-              {busy ? "Submitting..." : "Submit"}
-            </button>
+            <div className="typeform-list-submit">
+              <button className="typeform-ok submit" onClick={handleSubmit} disabled={busy}>
+                {busy ? <Loader2 size={18} className="spin" /> : "Submit"}
+              </button>
+            </div>
           </div>
         )}
       </main>
 
-      <footer className="public-form-footer">
-        <button className="proof-badge" onClick={() => setShowProofs(!showProofs)}>
-          <Lock size={12} />
-          {activeForm.schemaBlob?.storage === "walrus" ? "Verified on Walrus" : "Local storage"}
-          <ChevronDown size={12} style={{ transform: showProofs ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
+      {/* Minimal footer */}
+      <footer className="public-form-footer-minimal">
+        <button className="proof-badge-minimal" onClick={() => setShowProofs(!showProofs)}>
+          <Lock size={10} />
+          {activeForm.schemaBlob?.storage === "walrus" ? "Walrus" : "Local"}
         </button>
         <AnimatePresence>
           {showProofs && (
             <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="proof-details"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="proof-details-minimal"
             >
-              <div className="proof-details-inner">
-                <div className="proof-row"><span>Schema blob</span><code>{activeForm.schemaBlob.id}</code></div>
-                {activeForm.txDigest && (
-                  <div className="proof-row">
-                    <span>Sui transaction</span>
-                    <a className="proof-link" href={testnetTxUrl(activeForm.txDigest)} target="_blank" rel="noreferrer">{activeForm.txDigest}</a>
-                  </div>
-                )}
-                <div className="proof-row"><span>Storage</span><span>{activeForm.schemaBlob.storage === "walrus" ? "Walrus Testnet" : "Local fallback"}</span></div>
-              </div>
+              <span>{activeForm.schemaBlob.id.slice(0, 16)}...</span>
+              {activeForm.txDigest && (
+                <a href={testnetTxUrl(activeForm.txDigest)} target="_blank" rel="noreferrer">View tx ↗</a>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
@@ -1519,52 +1520,37 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
 }
 
 function PublicFormSuccess({ receipt, formId, navigate }: { receipt: Submission; formId: string; navigate: (path: string) => void }) {
-  const [showDetails, setShowDetails] = useState(false);
   return (
     <section className="public-success-page">
       <motion.div
-        initial={{ scale: 0.85, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ type: "spring", damping: 22, stiffness: 300 }}
-        className="public-success-card"
+        initial={{ opacity: 0, y: 30 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
+        className="typeform-success"
       >
-        <motion.div className="public-success-icon" initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.15, type: "spring", damping: 15, stiffness: 400 }}>
-          <Check size={48} strokeWidth={3} />
-        </motion.div>
+        <div className="typeform-success-icon">
+          <Check size={40} strokeWidth={2.5} />
+        </div>
         <h1>Thank you!</h1>
-        <p>Your response has been recorded and verified on the Walrus network.</p>
-        <div className="public-success-actions">
-          <button className="primary" onClick={() => window.location.reload()}>
-            <Plus size={16} /> Submit another response
+        <p>Your response has been recorded on Walrus.</p>
+        <div className="typeform-success-actions">
+          <button className="typeform-ok" onClick={() => window.location.reload()}>
+            Submit another
           </button>
-          <button className="secondary" onClick={() => navigate(`/admin/${formId}`)}>
-            <BarChart3 size={16} /> View responses
+          <button className="typeform-ok secondary" onClick={() => navigate(`/admin/${formId}`)}>
+            View responses
           </button>
         </div>
-        <button className="public-success-toggle" onClick={() => setShowDetails(!showDetails)}>
-          {showDetails ? "Hide" : "Show"} verification details
-          <ChevronDown size={14} style={{ transform: showDetails ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
-        </button>
-        <AnimatePresence>
-          {showDetails && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} className="public-success-details">
-              <dl>
-                <dt>Submission blob</dt>
-                <dd>{receipt.submissionBlob.id}</dd>
-                <dt>Sui transaction</dt>
-                <dd><a className="proof-link" href={testnetTxUrl(receipt.txDigest)} target="_blank" rel="noreferrer">{receipt.txDigest}</a></dd>
-                <dt>Storage</dt>
-                <dd>{receipt.submissionBlob.storage === "walrus" ? "Walrus Testnet" : "Local fallback"}</dd>
-              </dl>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <div className="typeform-success-proof">
+          <span>Blob: {receipt.submissionBlob.id.slice(0, 20)}...</span>
+          <a href={testnetTxUrl(receipt.txDigest)} target="_blank" rel="noreferrer">View tx ↗</a>
+        </div>
       </motion.div>
     </section>
   );
 }
 
-function ResponseField({
+function TypeformField({
   field,
   value,
   file,
@@ -1612,107 +1598,112 @@ function ResponseField({
   }
 
   return (
-    <div className={`response-field ${error ? "has-error" : ""}`}>
-      <div className="response-field-header">
-        <label className="response-field-label">{field.label || "Untitled Question"}{field.required ? <span className="response-required">*</span> : null}</label>
-        {field.required ? <span className="response-required-pill">Required</span> : null}
+    <div className={`typeform-field ${error ? "has-error" : ""}`}>
+      <div className="typeform-question-header">
+        <span className="typeform-number">{((index ?? 0) + 1).toString().padStart(2, "0")}</span>
+        <h2 className="typeform-question-title">
+          {field.label || "Untitled Question"}
+          {field.required && <span className="typeform-required">*</span>}
+        </h2>
       </div>
-      {field.helper ? <p className="response-field-helper">{field.helper}</p> : null}
+      {field.helper ? <p className="typeform-helper">{field.helper}</p> : null}
 
-      {field.type === "shortText" && (
-        <input className="response-input" type="text" value={String(value ?? "")} onChange={(e) => onValue(e.target.value)} placeholder="Your answer" />
-      )}
+      <div className="typeform-input-area">
+        {field.type === "shortText" && (
+          <input className="typeform-input" type="text" value={String(value ?? "")} onChange={(e) => onValue(e.target.value)} placeholder="Type your answer here..." autoFocus />
+        )}
 
-      {field.type === "richText" && (
-        <AutoResizeTextarea value={String(value ?? "")} onChange={(v) => onValue(v)} placeholder="Your answer" />
-      )}
+        {field.type === "richText" && (
+          <AutoResizeTextarea value={String(value ?? "")} onChange={(v) => onValue(v)} placeholder="Type your answer here..." />
+        )}
 
-      {field.type === "url" && (
-        <input className="response-input" type="url" value={String(value ?? "")} onChange={(e) => onValue(e.target.value)} placeholder="https://" />
-      )}
+        {field.type === "url" && (
+          <input className="typeform-input" type="url" value={String(value ?? "")} onChange={(e) => onValue(e.target.value)} placeholder="https://" autoFocus />
+        )}
 
-      {field.type === "dropdown" && (
-        <div className="response-dropdown">
-          <button ref={dropdownRef} className={`response-dropdown-trigger ${!value ? "placeholder" : ""}`} onClick={() => setDropdownOpen(!dropdownOpen)}>
-            {String(value || "Select an option")}
-            <ChevronDown size={16} style={{ transform: dropdownOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s", marginLeft: "auto" }} />
-          </button>
-          <AnimatePresence>
-            {dropdownOpen && (
-              <DropdownPortal>
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.12 }}
-                  className="response-dropdown-menu"
-                  style={{ position: "absolute", top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width }}
-                >
-                  {field.options?.map((option) => (
-                    <button key={option} className={value === option ? "active" : ""} onClick={() => { onValue(option); setDropdownOpen(false); }}>
-                      {option}
-                    </button>
-                  ))}
-                </motion.div>
-              </DropdownPortal>
+        {field.type === "dropdown" && (
+          <div className="typeform-dropdown">
+            <button ref={dropdownRef} className={`typeform-dropdown-trigger ${!value ? "placeholder" : ""}`} onClick={() => setDropdownOpen(!dropdownOpen)}>
+              {String(value || "Choose an option")}
+              <ChevronDown size={18} style={{ transform: dropdownOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s", marginLeft: "auto" }} />
+            </button>
+            <AnimatePresence>
+              {dropdownOpen && (
+                <DropdownPortal>
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.12 }}
+                    className="typeform-dropdown-menu"
+                    style={{ position: "absolute", top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width }}
+                  >
+                    {field.options?.map((option) => (
+                      <button key={option} className={value === option ? "active" : ""} onClick={() => { onValue(option); setDropdownOpen(false); }}>
+                        {option}
+                      </button>
+                    ))}
+                  </motion.div>
+                </DropdownPortal>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+
+        {field.type === "checkboxes" && (
+          <div className="typeform-checkboxes">
+            {field.options?.map((option) => {
+              const checked = Array.isArray(value) && value.includes(option);
+              return (
+                <label key={option} className={`typeform-checkbox ${checked ? "checked" : ""}`}>
+                  <input type="checkbox" checked={checked} onChange={(e) => {
+                    const current = Array.isArray(value) ? value : [];
+                    onValue(e.target.checked ? [...current, option] : current.filter((item) => item !== option));
+                  }} />
+                  <span className="typeform-checkbox-box">{checked && <Check size={14} strokeWidth={3} />}</span>
+                  <span className="typeform-checkbox-label">{option}</span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+
+        {field.type === "rating" && (
+          <div className="typeform-rating">
+            {[1, 2, 3, 4, 5].map((star) => {
+              const isActive = (hoverRating || Number(value || 0)) >= star;
+              return (
+                <button key={star} type="button" onClick={() => onValue(star)} onMouseEnter={() => setHoverRating(star)} onMouseLeave={() => setHoverRating(0)} className={isActive ? "active" : ""} aria-label={`Rate ${star} out of 5`}>
+                  <Star size={36} fill={isActive ? "currentColor" : "none"} strokeWidth={1.5} />
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {(field.type === "image" || field.type === "video") && (
+          <div className="typeform-file">
+            {!file ? (
+              <div className={`typeform-drop-zone ${isFileDragging ? "dragging" : ""}`} onDragOver={(e) => { e.preventDefault(); setIsFileDragging(true); }} onDragLeave={() => setIsFileDragging(false)} onDrop={handleFileDrop} onClick={() => fileInputRef.current?.click()}>
+                <input ref={fileInputRef} type="file" accept={field.type === "image" ? "image/*" : "video/*"} style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+                <Upload size={28} />
+                <span>Drop {field.type === "image" ? "image" : "video"} here or click to browse</span>
+              </div>
+            ) : (
+              <div className="typeform-file-pill">
+                {field.type === "image" ? <Image size={16} /> : <FileVideo size={16} />}
+                <span>{file.name}</span>
+                <small>{formatFileSize(file.size)}</small>
+                <button type="button" onClick={(e) => { e.preventDefault(); onClearFile(); }} aria-label="Clear selected file"><X size={14} /></button>
+              </div>
             )}
-          </AnimatePresence>
-        </div>
-      )}
-
-      {field.type === "checkboxes" && (
-        <div className="response-checkboxes">
-          {field.options?.map((option) => {
-            const checked = Array.isArray(value) && value.includes(option);
-            return (
-              <label key={option} className={`response-checkbox ${checked ? "checked" : ""}`}>
-                <input type="checkbox" checked={checked} onChange={(e) => {
-                  const current = Array.isArray(value) ? value : [];
-                  onValue(e.target.checked ? [...current, option] : current.filter((item) => item !== option));
-                }} />
-                <span className="response-checkbox-box">{checked && <Check size={14} strokeWidth={3} />}</span>
-                <span className="response-checkbox-label">{option}</span>
-              </label>
-            );
-          })}
-        </div>
-      )}
-
-      {field.type === "rating" && (
-        <div className="response-rating">
-          {[1, 2, 3, 4, 5].map((star) => {
-            const isActive = (hoverRating || Number(value || 0)) >= star;
-            return (
-              <button key={star} type="button" onClick={() => onValue(star)} onMouseEnter={() => setHoverRating(star)} onMouseLeave={() => setHoverRating(0)} className={isActive ? "active" : ""} aria-label={`Rate ${star} out of 5`}>
-                <Star size={32} fill={isActive ? "currentColor" : "none"} strokeWidth={1.5} />
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {(field.type === "image" || field.type === "video") && (
-        <div className="response-file">
-          {!file ? (
-            <div className={`file-drop-zone ${isFileDragging ? "dragging" : ""}`} onDragOver={(e) => { e.preventDefault(); setIsFileDragging(true); }} onDragLeave={() => setIsFileDragging(false)} onDrop={handleFileDrop} onClick={() => fileInputRef.current?.click()}>
-              <input ref={fileInputRef} type="file" accept={field.type === "image" ? "image/*" : "video/*"} style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
-              <Upload size={24} />
-              <span>Click or drop {field.type === "image" ? "image" : "video"} here</span>
-            </div>
-          ) : (
-            <div className="file-pill">
-              {field.type === "image" ? <Image size={16} /> : <FileVideo size={16} />}
-              <span>{file.name}</span>
-              <small>{formatFileSize(file.size)}</small>
-              <button type="button" onClick={(e) => { e.preventDefault(); onClearFile(); }} aria-label="Clear selected file"><X size={14} /></button>
-            </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
       <AnimatePresence>
         {error && (
-          <motion.div initial={{ opacity: 0, height: 0, y: -4 }} animate={{ opacity: 1, height: "auto", y: 0 }} exit={{ opacity: 0, height: 0, y: -4 }} transition={{ duration: 0.2 }} className="response-error">
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }} transition={{ duration: 0.2 }} className="typeform-error">
             <AlertCircle size={14} />
             {error}
           </motion.div>
