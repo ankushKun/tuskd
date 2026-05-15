@@ -22,6 +22,7 @@ import {
   AlertCircle,
   ArrowDown,
   ArrowUp,
+  Triangle,
   Copy,
   FileCheck2,
   X,
@@ -1426,12 +1427,12 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
           {isSlides ? `${activeStep + 1} / ${totalFields}` : `${activeSchema.fields.length} questions`}
         </span>
         {isSlides && totalFields > 1 && (
-          <span className="step-pill nav">
-            <button onClick={handlePrev} disabled={activeStep === 0} aria-label="Previous">
-              <ArrowUp size={12} />
+          <span className="step-pills-nav">
+            <button className="step-pill-nav-btn" onClick={handlePrev} disabled={activeStep === 0} aria-label="Previous">
+              <Triangle size={10} fill="currentColor" />
             </button>
-            <button onClick={handleNext} disabled={activeStep === totalFields - 1} aria-label="Next">
-              <ArrowDown size={12} />
+            <button className="step-pill-nav-btn" onClick={handleNext} disabled={activeStep === totalFields - 1} aria-label="Next">
+              <Triangle size={10} fill="currentColor" style={{ transform: "rotate(180deg)" }} />
             </button>
           </span>
         )}

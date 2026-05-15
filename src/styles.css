@@ -2640,27 +2640,30 @@ h2 {
   color: var(--primary);
   border-color: var(--primary);
 }
-.step-pill.nav {
-  padding: 4px;
-  gap: 2px;
+.step-pills-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
-.step-pill.nav button {
+.step-pill-nav-btn {
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border-radius: var(--radius-full);
-  border: none;
-  background: transparent;
+  border: 1px solid var(--border);
+  background: var(--bg-accent);
   color: var(--fg-muted);
   cursor: pointer;
   transition: all 0.15s;
+  padding: 0;
 }
-.step-pill.nav button:hover:not(:disabled) {
+.step-pill-nav-btn:hover:not(:disabled) {
   background: var(--bg-muted);
   color: var(--fg);
+  border-color: var(--primary);
 }
-.step-pill.nav button:disabled {
+.step-pill-nav-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
 }
@@ -3085,11 +3088,9 @@ h2 {
 .public-form-footer {
   padding: 20px 24px;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: flex-end;
-  flex-direction: column;
   gap: 8px;
-  position: relative;
 }
 .walrus-pill {
   display: inline-flex;
@@ -3106,6 +3107,7 @@ h2 {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   transition: all 0.15s;
+  flex-shrink: 0;
 }
 .walrus-pill:hover {
   color: var(--fg);
@@ -3115,18 +3117,16 @@ h2 {
   color: var(--primary);
 }
 .walrus-expand {
-  position: absolute;
-  right: 24px;
-  bottom: calc(100% + 8px);
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
   background: var(--bg-accent);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 10px 16px;
+  padding: 8px 14px;
   white-space: nowrap;
+  overflow: hidden;
 }
 .walrus-expand-row {
   display: flex;
@@ -3148,12 +3148,12 @@ h2 {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 5px 10px;
   border-radius: var(--radius-sm);
   border: none;
   background: var(--primary);
   color: var(--primary-fg);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.15s;
