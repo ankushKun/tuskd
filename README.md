@@ -1,53 +1,130 @@
-# TuskTable
+# Tuskd
 
-Walrus-native Airtable-style forms for the Walrus + Sui Sessions hackathon.
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=111)](https://react.dev/)
+[![Vite](https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=fff)](https://vite.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=fff)](https://www.typescriptlang.org/)
+[![Sui](https://img.shields.io/badge/Sui-Testnet-4DA2FF)](https://sui.io/)
+[![Walrus](https://img.shields.io/badge/Walrus-Testnet-7C3AED)](https://www.walrus.xyz/)
+[![Move](https://img.shields.io/badge/Move-Smart%20Contract-111827)](https://move-language.github.io/move/)
 
-This project is configured for **Sui Testnet** and **Walrus Testnet** for now.
+Tuskd is a wallet-native form platform for collecting structured responses, files, and review signals on Walrus and Sui Testnet. Creators build and publish forms, respondents submit through a public link, and each publish/submit/status update is backed by a real wallet-signed Sui transaction.
 
-## What it does
+## Features
 
-- Build structured feedback forms with required fields, ratings, dropdowns, checkboxes, URLs, rich text, screenshots, and video uploads.
-- Manage draft and published forms from a creator dashboard.
-- Publish shareable form links.
-- Store schemas, submissions, and media through Walrus Testnet.
-- Review, filter, prioritize, and export submissions from an admin dashboard.
-- Show Walrus receipts and real Sui Testnet transaction digests from the Move package calls.
-- Include a minimal Sui Move package in `move/` for the form object and submission/status events.
+- Sui wallet connection through `@mysten/dapp-kit`.
+- Drag-and-drop form builder with short text, rich text, dropdowns, checkboxes, ratings, URLs, image uploads, and video uploads.
+- Walrus Testnet storage for schemas, submissions, and uploaded media.
+- Real Sui Testnet Move calls for form publishing, response submission, and admin status updates.
+- Public form pages with wallet-aware response submission.
+- Admin dashboard for filtering, prioritizing, reviewing, and exporting submissions.
+- Share links, Walrus blob receipts, Sui transaction links, and CSV export.
+- Light/dark theme with responsive desktop and mobile layouts.
 
-## Run locally
+## Tech Stack
+
+- **Frontend:** React 19, Vite, TypeScript
+- **Wallet + Chain:** Sui Wallet Standard, `@mysten/dapp-kit`, `@mysten/sui`
+- **Storage:** Walrus Testnet publisher and aggregator APIs
+- **Smart Contract:** Sui Move package in `move/`
+- **UI:** Framer Motion, Lucide icons, Sonner toasts, dnd-kit
+
+## Deployed Testnet Contract
+
+The current Move package has been published to Sui Testnet.
+
+| Item | Value |
+| --- | --- |
+| Package ID | `0x593ad12342e188c4cde1d41b03ea8c740f4377d4586c8821f61482314616c0f3` |
+| Publish Tx | `BFSqWV1mSyvb9zD7W3ouKLSAjGP1BUXPbFPvqMGH4pJH` |
+| Upgrade Cap | `0xa21b7c6e2b064ed3009582ea2a2feb916358f37f611ae2a0ed4a07d6fb3fcd77` |
+
+Move entry points:
+
+- `create_form(title, description, schema_blob_id)`
+- `submit(form, submission_blob_id, media_blob_ids)`
+- `set_submission_status(form, submission_id, status, priority)`
+
+## Requirements
+
+- Node.js 18+
+- npm
+- Sui CLI, if you want to rebuild or republish the Move package
+- A Sui wallet funded on Testnet
+- Walrus Testnet publisher and aggregator endpoints
+
+## Environment
+
+Copy the example file and set the package ID.
+
+```bash
+cp .env.example .env.local
+```
+
+```bash
+VITE_SUI_RPC_URL=https://fullnode.testnet.sui.io:443
+VITE_WALRUS_PUBLISHER=https://publisher.walrus-testnet.walrus.space
+VITE_WALRUS_AGGREGATOR=https://aggregator.walrus-testnet.walrus.space
+VITE_WALRUS_EPOCHS=5
+VITE_TUSKTABLE_PACKAGE_ID=0x593ad12342e188c4cde1d41b03ea8c740f4377d4586c8821f61482314616c0f3
+```
+
+`Walrus` and `Sui Testnet` calls are required. Upload or transaction failures stop the publish/submit flow instead of falling back to browser-only behavior.
+
+## Local Development
 
 ```bash
 npm install
 npm run dev
 ```
 
-Testnet env:
+Open the local Vite URL, connect your Sui Testnet wallet, and start from `/forms`.
+
+## Production Build
 
 ```bash
-cp .env.example .env.local
-VITE_SUI_RPC_URL=https://fullnode.testnet.sui.io:443
-VITE_WALRUS_PUBLISHER=https://publisher.walrus-testnet.walrus.space
-VITE_WALRUS_AGGREGATOR=https://aggregator.walrus-testnet.walrus.space
-VITE_WALRUS_EPOCHS=5
+npm run build
+npm run preview
 ```
 
-Walrus and Sui Testnet calls are required. Upload or transaction failures stop the publish/submit flow instead of falling back to browser-only storage.
+## Move Package
 
-## Local Flow
+Build the Move package:
 
-1. Open `/forms`.
-2. Create a draft from the forms dashboard.
-3. Edit fields in `/builder/:formId`.
-4. Publish and copy the share link.
-5. Submit real feedback with a screenshot or video.
-6. Open `/admin/:formId`, filter/prioritize responses, and export CSV.
+```bash
+cd move
+sui move build
+```
 
-## Sui package
+Publish to Sui Testnet:
 
-The Move package in `move/` defines the intended on-chain contract:
+```bash
+cd move
+sui client publish --gas-budget 100000000
+```
 
-- `create_form(title, description, schema_blob_id)`
-- `submit(form, submission_blob_id, media_blob_ids)`
-- `set_submission_status(form, submission_id, status, priority)`
+After publishing, update `VITE_TUSKTABLE_PACKAGE_ID` with the new package ID.
 
-Publish, submit, and response status changes are wallet-signed Sui Testnet transactions. Deploy the package in `move/`, then set `VITE_TUSKTABLE_PACKAGE_ID` to the published package ID.
+## App Flow
+
+1. Connect a Sui Testnet wallet.
+2. Create a form from `/forms`.
+3. Edit questions and layout in `/builder/:formId`.
+4. Publish the form.
+5. The app uploads the schema to Walrus, signs a `create_form` transaction, and stores the Sui form object ID.
+6. Share the public `/f/:formId` link.
+7. Respondents connect a wallet, submit answers/media, and sign a `submit` transaction.
+8. Admins review responses in `/admin/:formId` and sign status/priority updates on Sui.
+
+## Scripts
+
+| Command | Description |
+| --- | --- |
+| `npm run dev` | Start Vite dev server |
+| `npm run build` | Typecheck and build production assets |
+| `npm run preview` | Preview production build locally |
+
+## Repository Notes
+
+- `.env.local` is intentionally ignored because it can contain environment-specific values.
+- `move/Published.toml` is generated by Sui Move publish metadata and should be committed.
+- Existing browser-local forms from older builds may not have a Sui object ID. Recreate or republish them with the current app before accepting real submissions.
