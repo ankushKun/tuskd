@@ -22,6 +22,7 @@ export type FormSchema = {
   title: string;
   description: string;
   encrypted: boolean;
+  layout?: "standard" | "slides";
   createdAt: string;
   fields: Field[];
 };

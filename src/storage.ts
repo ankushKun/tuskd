@@ -82,6 +82,15 @@ export function saveDraftForm(formId: string, schema: FormSchema) {
   return form;
 }
 
+export function deleteForm(formId: string) {
+  const store = readStore();
+  writeStore({
+    ...store,
+    forms: store.forms.filter((form) => form.id !== formId),
+    submissions: store.submissions.filter((sub) => sub.formId !== formId)
+  });
+}
+
 export function publishStoredForm(formId: string, schema: FormSchema, schemaBlob: BlobReceipt, txDigest: string) {
   const store = readStore();
   const existing = store.forms.find((form) => form.id === formId);
@@ -244,6 +253,7 @@ export function createDefaultSchema(): FormSchema {
     title: "Untitled feedback form",
     description: "Edit these starter questions, drag fields to reorder them, then publish a share link.",
     encrypted: false,
+    layout: "standard",
     createdAt: new Date().toISOString(),
     fields: [
       {

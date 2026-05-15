@@ -26,9 +26,33 @@ import {
   FileCheck2,
   X,
   Search,
+  Moon,
+  Sun,
+  LayoutTemplate,
+  LayoutList,
+  Columns3,
+  ArrowLeft,
+  ArrowRight,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import type { DragEvent } from "react";
+import { useEffect, useMemo, useState, createContext, useContext } from "react";
+import { toast } from "sonner";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type { BlobReceipt, Field, FieldType, FormSchema, StoredForm, Submission } from "./types";
 import { TESTNET_CONFIG, testnetTxUrl } from "./config";
 import {
@@ -36,6 +60,7 @@ import {
   createDefaultSchema,
   demoAddress,
   digest,
+  deleteForm,
   getForm,
   getForms,
   getSubmissions,
@@ -64,11 +89,6 @@ type SchemaIssue = {
   fieldId?: string;
   message: string;
 };
-
-type DropTarget = {
-  id: string;
-  position: "before" | "after";
-} | null;
 
 function createField(type: FieldType): Field {
   return {
@@ -154,6 +174,30 @@ function lastSubmissionAt(formId: string) {
   return dates[dates.length - 1];
 }
 
+type Theme = "light" | "dark";
+const ThemeContext = createContext<{ theme: Theme; toggleTheme: () => void }>({ theme: "light", toggleTheme: () => {} });
+
+function AppProvider({ children }: { children: React.ReactNode }) {
+  const [theme, setTheme] = useState<Theme>(() => {
+    const saved = localStorage.getItem("tusktable:theme");
+    if (saved === "dark" || saved === "light") return saved;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
+
+  useEffect(() => {
+    localStorage.setItem("tusktable:theme", theme);
+    if (theme === "dark") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  }, [theme]);
+
+  const toggleTheme = () => setTheme(current => current === "light" ? "dark" : "light");
+
+  return <ThemeContext.Provider value={{ theme, toggleTheme }}>{children}</ThemeContext.Provider>;
+}
+
 function App() {
   const [path, setPath] = useState(window.location.pathname);
 
@@ -173,22 +217,26 @@ function App() {
   const builderMatch = path.match(/^\/builder(?:\/([^/]+))?$/);
 
   return (
-    <main>
-      <TopBar navigate={navigate} />
-      {formMatch ? (
-        <PublicForm formId={formMatch[1]} navigate={navigate} />
-      ) : adminMatch ? (
-        <Dashboard formId={adminMatch[1]} navigate={navigate} />
-      ) : builderMatch ? (
-        <Builder formId={builderMatch[1]} navigate={navigate} />
-      ) : (
-        <FormsHome navigate={navigate} />
-      )}
-    </main>
+    <AppProvider>
+      <main>
+        <TopBar navigate={navigate} />
+        {formMatch ? (
+          <PublicForm formId={formMatch[1]} navigate={navigate} />
+        ) : adminMatch ? (
+          <Dashboard formId={adminMatch[1]} navigate={navigate} />
+        ) : builderMatch ? (
+          <Builder formId={builderMatch[1]} navigate={navigate} />
+        ) : (
+          <FormsHome navigate={navigate} />
+        )}
+      </main>
+    </AppProvider>
   );
 }
 
 function TopBar({ navigate }: { navigate: (path: string) => void }) {
+  const { theme, toggleTheme } = useContext(ThemeContext);
+
   return (
     <header className="topbar">
       <button className="brand" onClick={() => navigate("/forms")} aria-label="Open forms dashboard">
@@ -198,10 +246,15 @@ function TopBar({ navigate }: { navigate: (path: string) => void }) {
           <small>Sui Testnet + Walrus Testnet</small>
         </span>
       </button>
-      <div className="wallet-pill">
-        <Wallet size={16} />
-        Testnet
-        {shortAddress(demoAddress())}
+      <div className="topbar-actions">
+        <div className="wallet-pill">
+          <Wallet size={16} />
+          Testnet
+          {shortAddress(demoAddress())}
+        </div>
+        <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme">
+          {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+        </button>
       </div>
     </header>
   );
@@ -235,6 +288,7 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
     if (form.status !== "published") return;
     copy(`${window.location.origin}/f/${form.id}`);
     setCopiedId(form.id);
+    toast.success("Link copied to clipboard");
     window.setTimeout(() => setCopiedId(""), 1600);
   }
 
@@ -325,6 +379,13 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
                     </button>
                   </>
                 ) : null}
+                <button 
+                  onClick={() => handleDelete(form.id)}
+                  style={{ color: "var(--danger)", borderColor: "transparent", background: "transparent", marginLeft: "auto" }}
+                  aria-label="Delete form"
+                >
+                  <Trash2 size={15} />
+                </button>
               </div>
             </article>
           );
@@ -338,8 +399,6 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
   const [form, setForm] = useState<StoredForm | null>(() => (formId ? getForm(formId) : null));
   const [schema, setSchema] = useState<FormSchema>(() => getForm(formId ?? "")?.draftSchema ?? createDefaultSchema());
   const [selectedId, setSelectedId] = useState(schema.fields[0]?.id ?? "");
-  const [draggedId, setDraggedId] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<DropTarget>(null);
   const [busy, setBusy] = useState(false);
   const [publishError, setPublishError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -356,6 +415,22 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
   }, [schemaIssues]);
   const dirtySincePublish = Boolean(form?.schema && schemaFingerprint(form.schema) !== schemaFingerprint(schema));
   const canShare = Boolean(form?.status === "published" && form.schemaBlob && form.txDigest);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setSchema((current) => {
+        const oldIndex = current.fields.findIndex((f) => f.id === active.id);
+        const newIndex = current.fields.findIndex((f) => f.id === over.id);
+        return { ...current, fields: arrayMove(current.fields, oldIndex, newIndex) };
+      });
+    }
+  }
 
   useEffect(() => {
     if (!formId) {
@@ -434,32 +509,10 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
     setSelectedId(fieldId);
   }
 
-  function reorderField(draggedFieldId: string, targetFieldId: string, position: "before" | "after") {
-    if (draggedFieldId === targetFieldId) return;
-    setSchema((current) => {
-      const from = current.fields.findIndex((field) => field.id === draggedFieldId);
-      if (from < 0) return current;
-      const fields = [...current.fields];
-      const [moved] = fields.splice(from, 1);
-      const targetIndex = fields.findIndex((field) => field.id === targetFieldId);
-      if (targetIndex < 0) return current;
-      fields.splice(position === "after" ? targetIndex + 1 : targetIndex, 0, moved);
-      return { ...current, fields };
-    });
-    setSelectedId(draggedFieldId);
-  }
-
-  function allowDrop(event: DragEvent<HTMLElement>, targetFieldId: string) {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-    const rect = event.currentTarget.getBoundingClientRect();
-    const position = event.clientY > rect.top + rect.height / 2 ? "after" : "before";
-    setDropTarget({ id: targetFieldId, position });
-  }
-
   async function publish() {
     setPublishError("");
     if (schemaIssues.length) {
+      toast.error("Fix the highlighted field issues before publishing.");
       setPublishError("Fix the highlighted field issues before publishing.");
       return;
     }
@@ -471,9 +524,12 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
       const publishedForm = publishStoredForm(current.id, nextSchema, schemaBlob, digest());
       setForm(publishedForm);
       setSchema(publishedForm.draftSchema);
+      toast.success("Form published successfully to Walrus Testnet");
       if (!formId) navigate(`/builder/${publishedForm.id}`);
     } catch (error) {
-      setPublishError(error instanceof Error ? error.message : "Unable to publish this form.");
+      const msg = error instanceof Error ? error.message : "Unable to publish this form.";
+      setPublishError(msg);
+      toast.error(msg);
     } finally {
       setBusy(false);
     }
@@ -483,6 +539,7 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
     if (!canShare || !form) return;
     copy(`${window.location.origin}/f/${form.id}`);
     setCopied(true);
+    toast.success("Link copied to clipboard");
     window.setTimeout(() => setCopied(false), 1600);
   }
 
@@ -536,80 +593,56 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
               onChange={(event) => setSchema({ ...schema, description: event.target.value })}
             />
           </div>
-          <label className="switch-row">
-            <input
-              type="checkbox"
-              checked={schema.encrypted}
-              onChange={(event) => setSchema({ ...schema, encrypted: event.target.checked })}
-            />
-            <span>
-              <Lock size={15} />
-              Seal private mode
-            </span>
-          </label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-end" }}>
+            <label className="switch-row">
+              <input
+                type="checkbox"
+                checked={schema.encrypted}
+                onChange={(event) => setSchema({ ...schema, encrypted: event.target.checked })}
+              />
+              <span>
+                <Lock size={15} />
+                Seal private mode
+              </span>
+            </label>
+            <div className="view-toggle">
+              <button 
+                className={schema.layout !== "slides" ? "active" : ""} 
+                onClick={() => setSchema({ ...schema, layout: "standard" })}
+                title="Standard Layout"
+                aria-label="Standard Layout"
+              >
+                <LayoutList size={16} />
+              </button>
+              <button 
+                className={schema.layout === "slides" ? "active" : ""} 
+                onClick={() => setSchema({ ...schema, layout: "slides" })}
+                title="Slides Layout"
+                aria-label="Slides Layout"
+              >
+                <LayoutTemplate size={16} />
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="form-preview">
-          {schema.fields.map((field, index) => (
-            <article
-              className={`field-shell ${field.id === selected?.id ? "selected" : ""} ${field.id === draggedId ? "dragging" : ""} ${
-                dropTarget?.id === field.id ? `drop-${dropTarget.position}` : ""
-              } ${issueByField.has(field.id) ? "has-issue" : ""}`}
-              draggable
-              key={field.id}
-              onClick={() => setSelectedId(field.id)}
-              onDragStart={(event) => {
-                setDraggedId(field.id);
-                event.dataTransfer.effectAllowed = "move";
-                event.dataTransfer.setData("text/plain", field.id);
-              }}
-              onDragOver={(event) => allowDrop(event, field.id)}
-              onDragLeave={() => setDropTarget(null)}
-              onDrop={(event) => {
-                event.preventDefault();
-                reorderField(event.dataTransfer.getData("text/plain") || draggedId || "", field.id, dropTarget?.position ?? "before");
-                setDraggedId(null);
-                setDropTarget(null);
-              }}
-              onDragEnd={() => {
-                setDraggedId(null);
-                setDropTarget(null);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") setSelectedId(field.id);
-              }}
-              role="button"
-              tabIndex={0}
-            >
-              <span className="drag-handle" aria-label="Drag to reorder">
-                <GripVertical size={17} />
-              </span>
-              <span className="field-number">{index + 1}</span>
-              <FieldPreview field={field} issues={issueByField.get(field.id) ?? []} />
-              <div className="reorder-actions">
-                <button
-                  aria-label="Move field up"
-                  disabled={index === 0}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    moveField(field.id, -1);
-                  }}
-                >
-                  <ArrowUp size={15} />
-                </button>
-                <button
-                  aria-label="Move field down"
-                  disabled={index === schema.fields.length - 1}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    moveField(field.id, 1);
-                  }}
-                >
-                  <ArrowDown size={15} />
-                </button>
-              </div>
-            </article>
-          ))}
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={schema.fields.map((f) => f.id)} strategy={verticalListSortingStrategy}>
+              {schema.fields.map((field, index) => (
+                <SortableField
+                  key={field.id}
+                  field={field}
+                  index={index}
+                  isSelected={field.id === selected?.id}
+                  issue={issueByField.get(field.id)}
+                  totalFields={schema.fields.length}
+                  onSelect={() => setSelectedId(field.id)}
+                  onMove={moveField}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         </div>
       </section>
 
@@ -683,6 +716,73 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
         )}
       </aside>
     </section>
+  );
+}
+
+function SortableField({
+  field,
+  index,
+  isSelected,
+  issue,
+  totalFields,
+  onSelect,
+  onMove,
+}: {
+  field: Field;
+  index: number;
+  isSelected: boolean;
+  issue?: string[];
+  totalFields: number;
+  onSelect: () => void;
+  onMove: (fieldId: string, direction: -1 | 1) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    ...(isDragging ? { zIndex: 10, opacity: 0.5 } : {}),
+  };
+
+  return (
+    <article
+      ref={setNodeRef}
+      style={style}
+      className={`field-shell ${isSelected ? "selected" : ""} ${isDragging ? "dragging" : ""} ${issue?.length ? "has-issue" : ""}`}
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") onSelect();
+      }}
+      role="button"
+      tabIndex={0}
+    >
+      <span className="drag-handle" aria-label="Drag to reorder" {...attributes} {...listeners}>
+        <GripVertical size={17} />
+      </span>
+      <span className="field-number">{index + 1}</span>
+      <FieldPreview field={field} issues={issue ?? []} />
+      <div className="reorder-actions">
+        <button
+          aria-label="Move field up"
+          disabled={index === 0}
+          onClick={(event) => {
+            event.stopPropagation();
+            onMove(field.id, -1);
+          }}
+        >
+          <ArrowUp size={15} />
+        </button>
+        <button
+          aria-label="Move field down"
+          disabled={index === totalFields - 1}
+          onClick={(event) => {
+            event.stopPropagation();
+            onMove(field.id, 1);
+          }}
+        >
+          <ArrowDown size={15} />
+        </button>
+      </div>
+    </article>
   );
 }
 
@@ -852,6 +952,7 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
   const [receipt, setReceipt] = useState<Submission | null>(null);
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [activeStep, setActiveStep] = useState(0);
 
   useEffect(() => {
     setValues({});
@@ -948,8 +1049,11 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
       };
       saveSubmission(submission);
       setReceipt(submission);
+      toast.success("Feedback submitted successfully!");
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : "Unable to submit this response.");
+      const msg = error instanceof Error ? error.message : "Unable to submit this response.";
+      setSubmitError(msg);
+      toast.error(msg);
     } finally {
       setBusy(false);
     }
@@ -998,6 +1102,18 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
     );
   }
 
+  const isSlides = activeSchema.layout === "slides";
+  const currentField = activeSchema.fields[activeStep];
+  const progressPercentage = ((activeStep + 1) / activeSchema.fields.length) * 100;
+
+  function nextStep() {
+    if (activeStep < activeSchema.fields.length - 1) setActiveStep(s => s + 1);
+  }
+
+  function prevStep() {
+    if (activeStep > 0) setActiveStep(s => s - 1);
+  }
+
   return (
     <section className="public-wrap">
       <div className="public-header">
@@ -1013,34 +1129,78 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
       </div>
 
       <div className="public-form">
-        {submitError ? (
-          <div className="error-banner">
-            <AlertCircle size={16} />
-            {submitError}
+        {isSlides ? (
+          <div className="slides-layout">
+            <div className="slides-progress">
+              <div className="slides-progress-bar" style={{ width: `${progressPercentage}%` }} />
+            </div>
+            
+            {currentField ? (
+              <ResponseField
+                key={currentField.id}
+                field={currentField}
+                value={values[currentField.id]}
+                file={files[currentField.id]}
+                error={errors[currentField.id]}
+                onValue={(value) => setValues((current) => ({ ...current, [currentField.id]: value }))}
+                onFile={(file) => setFiles((current) => ({ ...current, [currentField.id]: file }))}
+                onClearFile={() =>
+                  setFiles((current) => {
+                    const next = { ...current };
+                    delete next[currentField.id];
+                    return next;
+                  })
+                }
+              />
+            ) : null}
+
+            <div className="slides-controls">
+              <button 
+                className="secondary" 
+                onClick={prevStep} 
+                disabled={activeStep === 0 || busy}
+              >
+                <ArrowLeft size={16} /> Previous
+              </button>
+              
+              {activeStep === activeSchema.fields.length - 1 ? (
+                <button className="submit-bar" style={{ width: "auto" }} onClick={submit} disabled={busy}>
+                  <Send size={17} />
+                  {busy ? "Uploading to Walrus" : "Submit feedback"}
+                </button>
+              ) : (
+                <button className="primary" onClick={nextStep} disabled={busy}>
+                  Next <ArrowRight size={16} />
+                </button>
+              )}
+            </div>
           </div>
-        ) : null}
-        {activeSchema.fields.map((field) => (
-          <ResponseField
-            key={field.id}
-            field={field}
-            value={values[field.id]}
-            file={files[field.id]}
-            error={errors[field.id]}
-            onValue={(value) => setValues((current) => ({ ...current, [field.id]: value }))}
-            onFile={(file) => setFiles((current) => ({ ...current, [field.id]: file }))}
-            onClearFile={() =>
-              setFiles((current) => {
-                const next = { ...current };
-                delete next[field.id];
-                return next;
-              })
-            }
-          />
-        ))}
-        <button className="submit-bar" onClick={submit} disabled={busy}>
-          <Send size={17} />
-          {busy ? "Uploading to Walrus" : "Submit feedback"}
-        </button>
+        ) : (
+          <>
+            {activeSchema.fields.map((field) => (
+              <ResponseField
+                key={field.id}
+                field={field}
+                value={values[field.id]}
+                file={files[field.id]}
+                error={errors[field.id]}
+                onValue={(value) => setValues((current) => ({ ...current, [field.id]: value }))}
+                onFile={(file) => setFiles((current) => ({ ...current, [field.id]: file }))}
+                onClearFile={() =>
+                  setFiles((current) => {
+                    const next = { ...current };
+                    delete next[field.id];
+                    return next;
+                  })
+                }
+              />
+            ))}
+            <button className="submit-bar" onClick={submit} disabled={busy}>
+              <Send size={17} />
+              {busy ? "Uploading to Walrus" : "Submit feedback"}
+            </button>
+          </>
+        )}
       </div>
     </section>
   );
@@ -1083,7 +1243,15 @@ function ResponseField({
         <div className="check-grid">
           {field.options?.map((option) => {
             const checked = Array.isArray(value) && value.includes(option);
-            return (
+  function handleDelete(formId: string) {
+    if (window.confirm("Are you sure you want to delete this form and all its responses?")) {
+      deleteForm(formId);
+      setForms(getForms());
+      toast.success("Form deleted");
+    }
+  }
+
+  return (
               <label key={option} className={checked ? "checked" : ""}>
                 <input
                   type="checkbox"
@@ -1141,6 +1309,7 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [priority, setPriority] = useState("all");
+  const [viewType, setViewType] = useState<"grid" | "table">("table");
 
   const filtered = useMemo(() => {
     return submissions.filter((submission) => {
@@ -1265,70 +1434,145 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
             Clear filters
           </button>
         ) : null}
+        
+        <div className="view-toggle">
+          <button 
+            className={viewType === "table" ? "active" : ""} 
+            onClick={() => setViewType("table")}
+            aria-label="Table View"
+          >
+            <Columns3 size={16} />
+          </button>
+          <button 
+            className={viewType === "grid" ? "active" : ""} 
+            onClick={() => setViewType("grid")}
+            aria-label="Grid View"
+          >
+            <LayoutList size={16} />
+          </button>
+        </div>
       </div>
 
-      <div className="submission-grid">
-        {!submissions.length ? (
-          <div className="empty-card">
-            <MessageSquareText size={22} />
-            <strong>No submissions yet</strong>
-            <span>Open the public form and send one real test response for the hackathon submission.</span>
-            <button className="primary" onClick={() => navigate(`/f/${activeForm.id}`)}>
-              <ExternalLink size={16} />
-              Open public form
-            </button>
-          </div>
-        ) : null}
-        {submissions.length > 0 && !filtered.length ? (
-          <div className="empty-card">
-            <AlertCircle size={22} />
-            <strong>No matching submissions</strong>
-            <span>Clear filters or adjust the search query.</span>
-          </div>
-        ) : null}
-        {filtered.map((submission) => (
-          <article className="submission-card" key={submission.id}>
-            <div className="submission-top">
-              <div>
-                <strong>{new Date(submission.createdAt).toLocaleString()}</strong>
-                <code>{submission.submissionBlob.id}</code>
-              </div>
-              <span className={`priority ${submission.priority}`}>{submission.priority}</span>
-            </div>
-            <div className="answer-list">
-              {adminSchema.fields.map((field) => (
-                <div key={field.id}>
-                  <span>{field.label}</span>
-                  <strong>{formatValue(submission.values[field.id]) || "-"}</strong>
-                </div>
+      {!submissions.length ? (
+        <div className="empty-card">
+          <MessageSquareText size={22} />
+          <strong>No submissions yet</strong>
+          <span>Open the public form and send one real test response for the hackathon submission.</span>
+          <button className="primary" onClick={() => navigate(`/f/${activeForm.id}`)}>
+            <ExternalLink size={16} />
+            Open public form
+          </button>
+        </div>
+      ) : submissions.length > 0 && !filtered.length ? (
+        <div className="empty-card">
+          <AlertCircle size={22} />
+          <strong>No matching submissions</strong>
+          <span>Clear filters or adjust the search query.</span>
+        </div>
+      ) : viewType === "table" ? (
+        <div className="submission-table-container">
+          <table className="submission-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Status</th>
+                <th>Priority</th>
+                {adminSchema.fields.map((field) => (
+                  <th key={field.id}>{field.label}</th>
+                ))}
+                <th>Media</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((submission) => (
+                <tr key={submission.id}>
+                  <td>
+                    <div>{new Date(submission.createdAt).toLocaleDateString()}</div>
+                    <code style={{ fontSize: 10 }}>{submission.submissionBlob.id.slice(0, 12)}...</code>
+                  </td>
+                  <td>
+                    <select className="secondary" value={submission.status} onChange={(event) => patchSubmission(submission, { status: event.target.value as Submission["status"] })}>
+                      <option value="new">New</option>
+                      <option value="reviewed">Reviewed</option>
+                      <option value="prioritized">Prioritized</option>
+                      <option value="archived">Archived</option>
+                    </select>
+                  </td>
+                  <td>
+                    <select className="secondary" value={submission.priority} onChange={(event) => patchSubmission(submission, { priority: event.target.value as Submission["priority"] })}>
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                    </select>
+                  </td>
+                  {adminSchema.fields.map((field) => (
+                    <td key={field.id}>
+                      {formatValue(submission.values[field.id]) || "-"}
+                    </td>
+                  ))}
+                  <td>
+                    {Object.values(submission.media).length ? (
+                      <div className="media-row">
+                        {Object.values(submission.media).map((blob) => (
+                          <a href={blob.url} target="_blank" rel="noreferrer" key={blob.id}>
+                            {blob.contentType?.startsWith("image") ? <Image size={14} /> : <FileVideo size={14} />}
+                            {blob.name?.slice(0, 8) || blob.id.slice(0, 8)}...
+                          </a>
+                        ))}
+                      </div>
+                    ) : "-"}
+                  </td>
+                </tr>
               ))}
-            </div>
-            {Object.values(submission.media).length ? (
-              <div className="media-row">
-                {Object.values(submission.media).map((blob) => (
-                  <a href={blob.url} target="_blank" rel="noreferrer" key={blob.id}>
-                    {blob.contentType?.startsWith("image") ? <Image size={16} /> : <FileVideo size={16} />}
-                    {blob.name || blob.id}
-                  </a>
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="submission-grid">
+          {filtered.map((submission) => (
+            <article className="submission-card" key={submission.id}>
+              <div className="submission-top">
+                <div>
+                  <strong>{new Date(submission.createdAt).toLocaleString()}</strong>
+                  <code>{submission.submissionBlob.id}</code>
+                </div>
+                <span className={`priority ${submission.priority}`}>{submission.priority}</span>
+              </div>
+              <div className="answer-list">
+                {adminSchema.fields.map((field) => (
+                  <div key={field.id}>
+                    <span>{field.label}</span>
+                    <strong>{formatValue(submission.values[field.id]) || "-"}</strong>
+                  </div>
                 ))}
               </div>
-            ) : null}
-            <div className="review-actions">
-              <select value={submission.status} onChange={(event) => patchSubmission(submission, { status: event.target.value as Submission["status"] })}>
-                <option value="new">New</option>
-                <option value="reviewed">Reviewed</option>
-                <option value="prioritized">Prioritized</option>
-                <option value="archived">Archived</option>
-              </select>
-              <select value={submission.priority} onChange={(event) => patchSubmission(submission, { priority: event.target.value as Submission["priority"] })}>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
-            </div>
-          </article>
-        ))}
-      </div>
+              {Object.values(submission.media).length ? (
+                <div className="media-row">
+                  {Object.values(submission.media).map((blob) => (
+                    <a href={blob.url} target="_blank" rel="noreferrer" key={blob.id}>
+                      {blob.contentType?.startsWith("image") ? <Image size={16} /> : <FileVideo size={16} />}
+                      {blob.name || blob.id}
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+              <div className="review-actions">
+                <select value={submission.status} onChange={(event) => patchSubmission(submission, { status: event.target.value as Submission["status"] })}>
+                  <option value="new">New</option>
+                  <option value="reviewed">Reviewed</option>
+                  <option value="prioritized">Prioritized</option>
+                  <option value="archived">Archived</option>
+                </select>
+                <select value={submission.priority} onChange={(event) => patchSubmission(submission, { priority: event.target.value as Submission["priority"] })}>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
