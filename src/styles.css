@@ -622,6 +622,7 @@ code {
   box-shadow: 0 12px 40px var(--shadow-color);
   padding: 6px;
   display: flex;
+  pointer-events: auto;
   flex-direction: column;
   gap: 2px;
   max-height: 320px;
@@ -2094,6 +2095,7 @@ h2 {
   border-radius: var(--radius-md);
   box-shadow: 0 12px 40px var(--shadow-color);
   padding: 6px;
+  pointer-events: auto;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -2392,6 +2394,7 @@ h2 {
   border-radius: var(--radius-md);
   box-shadow: 0 12px 40px var(--shadow-color);
   padding: 6px;
+  pointer-events: auto;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -2814,6 +2817,7 @@ h2 {
   box-shadow: 0 12px 40px var(--shadow-color);
   padding: 6px;
   display: flex;
+  pointer-events: auto;
   flex-direction: column;
   gap: 2px;
   min-width: 240px;
