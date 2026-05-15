@@ -1200,7 +1200,7 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
     setReceipt(null);
     setActiveStep(0);
     setShowProofs(false);
-    const saved = sessionStorage.getItem(`tusktable:draft:${formId}`);
+    const saved = localStorage.getItem(`tusktable:draft:${formId}`);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -1225,11 +1225,11 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
 
   useEffect(() => {
     if (receipt) {
-      sessionStorage.removeItem(`tusktable:draft:${formId}`);
+      localStorage.removeItem(`tusktable:draft:${formId}`);
       return;
     }
     const timer = setTimeout(() => {
-      sessionStorage.setItem(`tusktable:draft:${formId}`, JSON.stringify({ values }));
+      localStorage.setItem(`tusktable:draft:${formId}`, JSON.stringify({ values }));
     }, 500);
     return () => clearTimeout(timer);
   }, [values, receipt, formId]);
@@ -1393,10 +1393,22 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [activeStep, values, files, activeSchema, isSlides, totalFields]);
 
+  // Focus first field on initial load
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const el = document.querySelector<HTMLElement>(
+        ".typeform-input, .typeform-input-area input, .typeform-input-area textarea"
+      );
+      if (el) el.focus();
+    }, 400);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Focus field on slide change
   useEffect(() => {
     if (!isSlides) return;
     const timer = setTimeout(() => {
-      const el = document.querySelector<HTMLElement>(".slides-question-wrapper input, .slides-question-wrapper textarea, .slides-question-wrapper select");
+      const el = document.querySelector<HTMLElement>(".slides-question-wrapper .typeform-input, .slides-question-wrapper .typeform-input-area input, .slides-question-wrapper .typeform-input-area textarea");
       if (el) el.focus();
     }, 350);
     return () => clearTimeout(timer);
@@ -1408,11 +1420,21 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
 
   return (
     <div className="public-form-page">
-      {/* Step counter pill */}
+      {/* Step counter pill with nav */}
       <div className="public-form-meta">
         <span className="step-pill">
           {isSlides ? `${activeStep + 1} / ${totalFields}` : `${activeSchema.fields.length} questions`}
         </span>
+        {isSlides && totalFields > 1 && (
+          <span className="step-pill nav">
+            <button onClick={handlePrev} disabled={activeStep === 0} aria-label="Previous">
+              <ArrowUp size={12} />
+            </button>
+            <button onClick={handleNext} disabled={activeStep === totalFields - 1} aria-label="Next">
+              <ArrowDown size={12} />
+            </button>
+          </span>
+        )}
         {activeSchema.encrypted && (
           <span className="step-pill encrypted"><Lock size={12} /> Private</span>
         )}
@@ -1454,11 +1476,6 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
             </AnimatePresence>
 
             <div className="typeform-nav">
-              {activeStep > 0 && (
-                <button className="typeform-nav-arrow" onClick={handlePrev} aria-label="Previous question">
-                  <ArrowUp size={20} />
-                </button>
-              )}
               {activeStep < totalFields - 1 ? (
                 <button className="typeform-ok" onClick={handleNext}>
                   OK
@@ -1627,7 +1644,7 @@ function TypeformField({
 
       <div className="typeform-input-area">
         {field.type === "shortText" && (
-          <input className="typeform-input" type="text" value={String(value ?? "")} onChange={(e) => onValue(e.target.value)} placeholder="Type your answer here..." autoFocus />
+          <input className="typeform-input" type="text" value={String(value ?? "")} onChange={(e) => onValue(e.target.value)} placeholder="Type your answer here..." />
         )}
 
         {field.type === "richText" && (
@@ -1635,7 +1652,7 @@ function TypeformField({
         )}
 
         {field.type === "url" && (
-          <input className="typeform-input" type="url" value={String(value ?? "")} onChange={(e) => onValue(e.target.value)} placeholder="https://" autoFocus />
+          <input className="typeform-input" type="url" value={String(value ?? "")} onChange={(e) => onValue(e.target.value)} placeholder="https://" />
         )}
 
         {field.type === "dropdown" && (

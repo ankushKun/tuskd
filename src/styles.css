@@ -2640,6 +2640,30 @@ h2 {
   color: var(--primary);
   border-color: var(--primary);
 }
+.step-pill.nav {
+  padding: 4px;
+  gap: 2px;
+}
+.step-pill.nav button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.step-pill.nav button:hover:not(:disabled) {
+  background: var(--bg-muted);
+  color: var(--fg);
+}
+.step-pill.nav button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
 
 /* Body */
 .public-form-body {
@@ -2975,11 +2999,10 @@ h2 {
   gap: 0;
 }
 .typeform-question {
-  padding: 40px 0;
-  border-bottom: 1px solid var(--border);
+  padding: 48px 0;
 }
-.typeform-question:last-child {
-  border-bottom: none;
+.typeform-question:first-child {
+  padding-top: 24px;
 }
 .typeform-list-submit {
   padding: 32px 0 16px;
