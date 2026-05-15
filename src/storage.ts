@@ -209,6 +209,18 @@ export async function readJsonBlob<T>(receipt: BlobReceipt): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export function walrusJsonReceipt(blobId: string, name = "form-schema.json"): BlobReceipt {
+  return {
+    id: blobId,
+    storage: "walrus",
+    network: "walrus-testnet",
+    url: `${aggregator}/v1/blobs/${blobId}`,
+    type: "json",
+    name,
+    contentType: "application/json",
+  };
+}
+
 export function createDefaultSchema(): FormSchema {
   return {
     id: id("schema"),

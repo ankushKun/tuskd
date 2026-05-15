@@ -45,6 +45,7 @@ import {
   Inbox,
   TrendingUp,
   Eye,
+  Github,
   MoreHorizontal,
 } from "lucide-react";
 import React, { useEffect, useMemo, useState, createContext, useContext, useRef } from "react";
@@ -89,6 +90,7 @@ import {
   updateSubmission,
   uploadFile,
   uploadJson,
+  walrusJsonReceipt,
 } from "./storage";
 
 const fieldTypes: Array<{ type: FieldType; label: string; icon: typeof MessageSquareText }> = [
@@ -187,6 +189,63 @@ function findSubmissionEventId(tx: unknown) {
   const event = events.find((item) => item.type?.toLowerCase() === eventType);
   const value = event?.parsedJson?.submission_id;
   return value === undefined ? "" : String(value);
+}
+
+function publicFormId(form: StoredForm) {
+  return form.suiObjectId || form.id;
+}
+
+function publicFormPath(form: StoredForm) {
+  return `/f/${publicFormId(form)}`;
+}
+
+function isLocalFormId(value: string) {
+  return value.startsWith("form_");
+}
+
+function asMoveString(value: unknown) {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return "";
+  const fields = (value as { fields?: Record<string, unknown> }).fields;
+  if (!fields) return "";
+  return asMoveString(fields.contents ?? fields.bytes ?? fields.value);
+}
+
+async function fetchPublishedFormFromSui(formObjectId: string, suiClient: ReturnType<typeof useSuiClient>): Promise<StoredForm> {
+  const response = await suiClient.getObject({
+    id: formObjectId,
+    options: { showContent: true },
+  });
+  const content = response.data?.content;
+  if (!content || content.dataType !== "moveObject") {
+    throw new Error("No published TuskD form object was found for this link.");
+  }
+  if (!content.type.endsWith("::forms::Form")) {
+    throw new Error("This Sui object is not a TuskD form.");
+  }
+
+  const fields = content.fields as Record<string, unknown>;
+  const schemaBlobId = asMoveString(fields.schema_blob_id);
+  if (!schemaBlobId) {
+    throw new Error("The form object does not include a Walrus schema blob.");
+  }
+
+  const schemaBlob = walrusJsonReceipt(schemaBlobId);
+  const schema = await readJsonBlob<FormSchema>(schemaBlob);
+  const now = new Date().toISOString();
+  return {
+    id: formObjectId,
+    owner: asMoveString(fields.owner) || "",
+    network: "sui-testnet",
+    status: "published",
+    draftSchema: schema,
+    schema,
+    schemaBlob,
+    suiObjectId: formObjectId,
+    createdAt: schema.createdAt || now,
+    updatedAt: now,
+    publishedAt: schema.createdAt || now,
+  };
 }
 
 const statusCode: Record<Submission["status"], number> = {
@@ -787,7 +846,7 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
 
   function copyFormLink(form: StoredForm) {
     if (form.status !== "published") return;
-    copy(`${window.location.origin}/f/${form.id}`);
+    copy(`${window.location.origin}${publicFormPath(form)}`);
     setCopiedId(form.id);
     toast.success("Link copied to clipboard");
     window.setTimeout(() => setCopiedId(""), 1600);
@@ -900,7 +959,7 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
                   </button>
                   {form.status === "published" && (
                     <>
-                      <button onClick={() => navigate(`/f/${form.id}`)} title="Open form">
+                      <button onClick={() => navigate(publicFormPath(form))} title="Open form">
                         <ExternalLink size={15} />
                       </button>
                       <button onClick={() => navigate(`/admin/${form.id}`)} title="Responses">
@@ -1141,7 +1200,7 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
 
   function copyShareLink() {
     if (form?.status !== "published") return;
-    copy(`${window.location.origin}/f/${form.id}`);
+    copy(`${window.location.origin}${publicFormPath(form)}`);
     setCopied(true);
     toast.success("Link copied to clipboard");
     window.setTimeout(() => setCopied(false), 1600);
@@ -1638,6 +1697,88 @@ function PublicFormPreview({ schema }: { schema: FormSchema }) {
 
 function PublicForm({ formId, navigate }: { formId: string; navigate: (path: string) => void }) {
   const [form, setForm] = useState<StoredForm | null>(() => getForm(formId));
+  const [loadingForm, setLoadingForm] = useState(() => !getForm(formId));
+  const [loadError, setLoadError] = useState("");
+  const suiClient = useSuiClient();
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadError("");
+    const current = getForm(formId);
+    setLoadingForm(true);
+
+    async function loadForm() {
+      try {
+        if (current) {
+          if (current.status !== "published" || !current.schemaBlob) {
+            if (!cancelled) setForm(current);
+            return;
+          }
+          try {
+            const schema = await readJsonBlob<FormSchema>(current.schemaBlob);
+            if (!cancelled) setForm({ ...current, schema });
+          } catch {
+            if (!cancelled) setForm(current);
+          }
+          return;
+        }
+
+        if (isLocalFormId(formId)) {
+          throw new Error("This link uses a local form id. Copy the published public link again so it uses the Sui form object id.");
+        }
+
+        const remoteForm = await fetchPublishedFormFromSui(formId, suiClient);
+        if (!cancelled) setForm(remoteForm);
+      } catch (error) {
+        if (!cancelled) {
+          setForm(null);
+          setLoadError(error instanceof Error ? error.message : "Unable to load this form from the network.");
+        }
+      } finally {
+        if (!cancelled) setLoadingForm(false);
+      }
+    }
+
+    loadForm();
+    return () => {
+      cancelled = true;
+    };
+  }, [formId, suiClient]);
+
+  if (loadingForm) {
+    return (
+      <section className="public-form-state">
+        <Loader2 size={28} className="spin" />
+        <h1>Loading form</h1>
+        <p className="muted">Fetching the Sui form object and Walrus schema.</p>
+      </section>
+    );
+  }
+
+  if (!form) {
+    return (
+      <section className="public-form-state">
+        <h1>Form not found</h1>
+        <p className="muted">{loadError || "No published TuskD form was found for this link."}</p>
+        <button className="primary" onClick={() => navigate("/builder")}>Create a form</button>
+      </section>
+    );
+  }
+
+  if (form.status !== "published" || !form.schema || !form.schemaBlob) {
+    return (
+      <section className="public-form-state">
+        <h1>This form is still a draft</h1>
+        <p className="muted">Publish it before sharing a public response link.</p>
+        <button className="primary" onClick={() => navigate(`/builder/${form.id}`)}>Open builder</button>
+      </section>
+    );
+  }
+
+  return <PublicFormLoaded key={formId} form={form} formId={formId} navigate={navigate} />;
+}
+
+function PublicFormLoaded({ form, formId, navigate }: { form: StoredForm; formId: string; navigate: (path: string) => void }) {
   const [values, setValues] = useState<Record<string, string | string[] | number>>({});
   const [files, setFiles] = useState<Record<string, File>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -1645,7 +1786,6 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
   const [busy, setBusy] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
   const [direction, setDirection] = useState(1);
-  const [showProofs, setShowProofs] = useState(false);
   const account = useCurrentAccount();
   const suiClient = useSuiClient();
   const signAndExecute = useSignAndExecuteTransaction();
@@ -1654,7 +1794,6 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
     setErrors({});
     setReceipt(null);
     setActiveStep(0);
-    setShowProofs(false);
     const draftKey = `tuskd:draft:${formId}`;
     const legacyDraftKey = `${"tusk"}table:draft:${formId}`;
     const saved = localStorage.getItem(draftKey) ?? localStorage.getItem(legacyDraftKey);
@@ -1669,15 +1808,6 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
       setValues({});
     }
     setFiles({});
-    const current = getForm(formId);
-    if (!current) return;
-    if (current.status !== "published" || !current.schemaBlob) {
-      setForm(current);
-      return;
-    }
-    readJsonBlob<FormSchema>(current.schemaBlob)
-      .then((schema) => setForm({ ...current, schema }))
-      .catch(() => setForm(current));
   }, [formId]);
 
   useEffect(() => {
@@ -1693,30 +1823,9 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
     return () => clearTimeout(timer);
   }, [values, receipt, formId]);
 
-  if (!form) {
-    return (
-      <section className="center-state">
-        <h1>Form not found</h1>
-        <p className="muted">This browser has no local record for that form yet.</p>
-        <button className="primary" onClick={() => navigate("/builder")}>Create a form</button>
-      </section>
-    );
-  }
-
   const activeForm = form;
   const publishedSchema = activeForm.schema;
-
-  if (activeForm.status !== "published" || !publishedSchema || !activeForm.schemaBlob) {
-    return (
-      <section className="center-state">
-        <h1>This form is still a draft</h1>
-        <p className="muted">Publish it before sharing a public response link.</p>
-        <button className="primary" onClick={() => navigate(`/builder/${activeForm.id}`)}>Open builder</button>
-      </section>
-    );
-  }
-
-  const activeSchema = publishedSchema;
+  const activeSchema = publishedSchema!;
   const isSlides = activeSchema.layout === "slides";
   const currentField = activeSchema.fields[activeStep];
   const totalFields = activeSchema.fields.length;
@@ -1881,17 +1990,26 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
       const el = document.querySelector<HTMLElement>(
         ".typeform-input, .typeform-input-area input, .typeform-input-area textarea"
       );
-      if (el) el.focus();
+      if (el) el.focus({ preventScroll: true });
     }, 400);
     return () => clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (isSlides) return;
+    const frame = requestAnimationFrame(() => {
+      const body = document.querySelector<HTMLElement>(".public-form-body");
+      if (body) body.scrollTop = 0;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [isSlides, activeSchema.id]);
 
   // Focus field on slide change
   useEffect(() => {
     if (!isSlides) return;
     const timer = setTimeout(() => {
       const el = document.querySelector<HTMLElement>(".slides-question-wrapper .typeform-input, .slides-question-wrapper .typeform-input-area input, .slides-question-wrapper .typeform-input-area textarea");
-      if (el) el.focus();
+      if (el) el.focus({ preventScroll: true });
     }, 350);
     return () => clearTimeout(timer);
   }, [activeStep, isSlides]);
@@ -1973,6 +2091,7 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
           </div>
         ) : (
           <div className="list-container">
+            <div className="list-scroll-spacer list-scroll-spacer--top" aria-hidden="true" />
             {activeSchema.fields.map((field, index) => (
               <div key={field.id} id={`q-${field.id}`} className="typeform-question">
                 <TypeformField
@@ -2001,41 +2120,29 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
                 {busy ? <Loader2 size={18} className="spin" /> : "Submit"}
               </button>
             </div>
+            <div className="list-scroll-spacer list-scroll-spacer--bottom" aria-hidden="true" />
           </div>
         )}
       </main>
 
       {/* Footer */}
       <footer className="public-form-footer">
+        <a
+          className="github-pill"
+          href="https://github.com/ankushKun/tuskd"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="View TuskD on GitHub"
+        >
+          <Github size={12} strokeWidth={2.5} />
+          <span>GitHub</span>
+        </a>
         <button
           className="walrus-pill"
-          onClick={() => setShowProofs(!showProofs)}
+          onClick={() => navigate("/")}
         >
           <Lock size={10} strokeWidth={2.5} />
-          <AnimatePresence>
-            {showProofs && (
-              <motion.span
-                className="walrus-pill-expand"
-                initial={{ opacity: 0, width: 0 }}
-                animate={{ opacity: 1, width: "auto" }}
-                exit={{ opacity: 0, width: 0 }}
-                transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
-              >
-                <span className="walrus-expand-code">{activeForm.schemaBlob.id.slice(0, 16)}...</span>
-                {activeForm.txDigest && (
-                  <a href={testnetTxUrl(activeForm.txDigest)} target="_blank" rel="noreferrer">View tx ↗</a>
-                )}
-                <button
-                  className="walrus-expand-create"
-                  onClick={(e) => { e.stopPropagation(); navigate("/builder"); }}
-                >
-                  <Plus size={11} /> Create
-                </button>
-                <span className="walrus-expand-divider" />
-              </motion.span>
-            )}
-          </AnimatePresence>
-          <span className="walrus-pill-label">Powered by Walrus</span>
+          <span className="walrus-pill-label">Powered by TuskD</span>
         </button>
       </footer>
     </div>
@@ -2388,7 +2495,7 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
           <p className="muted">{submissions.length} submission{submissions.length === 1 ? "" : "s"} &middot; {adminSchema.fields.length} question{adminSchema.fields.length === 1 ? "" : "s"}</p>
         </div>
         <div className="dashboard-header-actions">
-          <button className="secondary" onClick={() => navigate(`/f/${activeForm.id}`)}>
+          <button className="secondary" onClick={() => navigate(publicFormPath(activeForm))}>
             <ExternalLink size={15} /> Public form
           </button>
           <button className="primary" onClick={exportCsv}>
@@ -2514,7 +2621,7 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
           <div className="empty-state-icon"><MessageSquareText size={32} /></div>
           <h2>No submissions yet</h2>
           <p>Open the public form and send a test response.</p>
-          <button className="primary" onClick={() => navigate(`/f/${activeForm.id}`)}>
+          <button className="primary" onClick={() => navigate(publicFormPath(activeForm))}>
             <ExternalLink size={16} /> Open public form
           </button>
         </motion.div>
