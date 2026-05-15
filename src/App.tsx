@@ -190,6 +190,36 @@ function lastSubmissionAt(formId: string) {
 }
 
 type Theme = "light" | "dark";
+function useDropdownPosition(triggerRef: React.RefObject<HTMLElement | null>, isOpen: boolean) {
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+  useEffect(() => {
+    if (!isOpen || !triggerRef.current) return;
+    function update() {
+      const rect = triggerRef.current!.getBoundingClientRect();
+      setPos({ top: rect.bottom + window.scrollY + 6, left: rect.left + window.scrollX, width: rect.width });
+    }
+    update();
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [isOpen, triggerRef]);
+  return pos;
+}
+
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const mql = window.matchMedia(query);
+    const handler = (e: MediaQueryListEvent) => setMatches(e.matches);
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, [query]);
+  return matches;
+}
+
 const ThemeContext = createContext<{ theme: Theme; toggleTheme: () => void }>({ theme: "light", toggleTheme: () => {} });
 
 function AppProvider({ children }: { children: React.ReactNode }) {
@@ -262,10 +292,10 @@ function TopBar({ navigate }: { navigate: (path: string) => void }) {
         </span>
       </button>
       <div className="topbar-actions">
-        <div className="wallet-pill">
+        <div className="wallet-pill" title="Demo wallet address">
           <Wallet size={16} />
-          Testnet
-          {shortAddress(demoAddress())}
+          <span>Demo</span>
+          <span className="wallet-address">{shortAddress(demoAddress())}</span>
         </div>
         <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme">
           {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
@@ -383,7 +413,7 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
       </div>
 
       {forms.length === 0 ? (
-        <div className="empty-state">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="empty-state">
           <div className="empty-state-icon">
             <FileText size={32} />
           </div>
@@ -392,9 +422,9 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
           <button className="primary" onClick={newForm}>
             <Plus size={16} /> Create your first form
           </button>
-        </div>
+        </motion.div>
       ) : filteredForms.length === 0 ? (
-        <div className="empty-state">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="empty-state">
           <div className="empty-state-icon">
             <Search size={32} />
           </div>
@@ -403,7 +433,7 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
           <button className="secondary" onClick={() => { setQuery(""); setFilter("all"); }}>
             <X size={16} /> Clear filters
           </button>
-        </div>
+        </motion.div>
       ) : null}
 
       <div className="forms-grid">
@@ -469,7 +499,7 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
   const [addModalIndex, setAddModalIndex] = useState(0);
   const [mobileEditorOpen, setMobileEditorOpen] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
-  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+  const isMobile = useMediaQuery("(max-width: 767px)");
 
   const schemaIssues = useMemo(() => validateSchema(schema), [schema]);
   const issueByField = useMemo(() => {
@@ -525,6 +555,18 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
     if (!form) return;
     setForm(saveDraftForm(form.id, schema));
   }, [schema]);
+
+  // Beforeunload guard for unsaved changes
+  useEffect(() => {
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      if (dirtySincePublish) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirtySincePublish]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -640,10 +682,10 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
             <span className={`save-status ${dirtySincePublish ? 'dirty' : ''}`}>{dirtySincePublish ? "Unsaved edits" : "Saved"}</span>
           </div>
         </div>
-        <div className="builder-tabs">
-          <button className={activeTab === "build" ? "active" : ""} onClick={() => setActiveTab("build")}>Build</button>
-          <button className={activeTab === "settings" ? "active" : ""} onClick={() => setActiveTab("settings")}>Settings</button>
-          <button className={activeTab === "preview" ? "active" : ""} onClick={() => setActiveTab("preview")}>Preview</button>
+        <div className="builder-tabs" role="tablist" aria-label="Builder tabs">
+          <button role="tab" aria-selected={activeTab === "build"} className={activeTab === "build" ? "active" : ""} onClick={() => setActiveTab("build")}>Build</button>
+          <button role="tab" aria-selected={activeTab === "settings"} className={activeTab === "settings" ? "active" : ""} onClick={() => setActiveTab("settings")}>Settings</button>
+          <button role="tab" aria-selected={activeTab === "preview"} className={activeTab === "preview" ? "active" : ""} onClick={() => setActiveTab("preview")}>Preview</button>
         </div>
         <div className="builder-header-right">
           {form?.status === "published" && (
@@ -662,10 +704,10 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
           {activeTab === "build" && (
             <motion.div
               key="build"
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              transition={{ duration: 0.2 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
               className="builder-canvas"
             >
               <textarea className="builder-desc" value={schema.description} onChange={e => setSchema({...schema, description: e.target.value})} placeholder="Form description or instructions..." />
@@ -708,10 +750,10 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
           {activeTab === "settings" && (
             <motion.div
               key="settings"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.2 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
               className="builder-settings-panel"
             >
               <div className="settings-card">
@@ -875,10 +917,15 @@ function SortableField({
   };
 
   const contentRef = useRef<HTMLDivElement>(null);
+  const hasScrolledRef = useRef(false);
 
   useEffect(() => {
-    if (isSelected && contentRef.current) {
+    if (isSelected && contentRef.current && !hasScrolledRef.current) {
+      hasScrolledRef.current = true;
       contentRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    if (!isSelected) {
+      hasScrolledRef.current = false;
     }
   }, [isSelected]);
 
@@ -971,7 +1018,8 @@ function FieldEditorInline({ field, updateField }: { field: Field, updateField: 
   const options = field.options ?? [];
   const usesOptions = field.type === "dropdown" || field.type === "checkboxes";
   const [selectOpen, setSelectOpen] = useState(false);
-  const selectRef = useRef<HTMLDivElement>(null);
+  const selectRef = useRef<HTMLButtonElement>(null);
+  const dropdownPos = useDropdownPosition(selectRef, selectOpen);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -983,9 +1031,9 @@ function FieldEditorInline({ field, updateField }: { field: Field, updateField: 
 
   return (
     <div className="field-inline-editor">
-      <div className="field-inline-row" ref={selectRef}>
+      <div className="field-inline-row">
         <label>Field Type</label>
-        <button className="field-custom-select" onClick={() => setSelectOpen(!selectOpen)}>
+        <button ref={selectRef} className="field-custom-select" onClick={() => setSelectOpen(!selectOpen)}>
           {(() => {
             const item = fieldTypes.find(i => i.type === field.type);
             return item ? <><item.icon size={16} /> {item.label}</> : field.type;
@@ -999,6 +1047,7 @@ function FieldEditorInline({ field, updateField }: { field: Field, updateField: 
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -4 }}
               className="field-custom-select-dropdown"
+              style={{ position: "fixed", top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width, zIndex: 9999 }}
             >
               {fieldTypes.map(item => (
                 <button 
@@ -1114,12 +1163,22 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
   const [showProofs, setShowProofs] = useState(false);
 
   useEffect(() => {
-    setValues({});
-    setFiles({});
     setErrors({});
     setReceipt(null);
     setActiveStep(0);
     setShowProofs(false);
+    const saved = sessionStorage.getItem(`tusktable:draft:${formId}`);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setValues(parsed.values || {});
+      } catch {
+        setValues({});
+      }
+    } else {
+      setValues({});
+    }
+    setFiles({});
     const current = getForm(formId);
     if (!current) return;
     if (current.status !== "published" || !current.schemaBlob) {
@@ -1130,6 +1189,17 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
       .then((schema) => setForm({ ...current, schema }))
       .catch(() => setForm(current));
   }, [formId]);
+
+  useEffect(() => {
+    if (receipt) {
+      sessionStorage.removeItem(`tusktable:draft:${formId}`);
+      return;
+    }
+    const timer = setTimeout(() => {
+      sessionStorage.setItem(`tusktable:draft:${formId}`, JSON.stringify({ values }));
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [values, receipt, formId]);
 
   if (!form) {
     return (
@@ -1407,7 +1477,7 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
       <footer className="public-form-footer">
         <button className="proof-badge" onClick={() => setShowProofs(!showProofs)}>
           <Lock size={12} />
-          Verified on Walrus
+          {activeForm.schemaBlob?.storage === "walrus" ? "Verified on Walrus" : "Local storage"}
           <ChevronDown size={12} style={{ transform: showProofs ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
         </button>
         <AnimatePresence>
@@ -1505,7 +1575,7 @@ function ResponseField({
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [hoverRating, setHoverRating] = useState(0);
   const [isFileDragging, setIsFileDragging] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLButtonElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -1550,14 +1620,21 @@ function ResponseField({
       )}
 
       {field.type === "dropdown" && (
-        <div className="response-dropdown" ref={dropdownRef}>
-          <button className={`response-dropdown-trigger ${!value ? "placeholder" : ""}`} onClick={() => setDropdownOpen(!dropdownOpen)}>
+        <div className="response-dropdown">
+          <button ref={dropdownRef} className={`response-dropdown-trigger ${!value ? "placeholder" : ""}`} onClick={() => setDropdownOpen(!dropdownOpen)}>
             {String(value || "Select an option")}
             <ChevronDown size={16} style={{ transform: dropdownOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s", marginLeft: "auto" }} />
           </button>
           <AnimatePresence>
             {dropdownOpen && (
-              <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.15 }} className="response-dropdown-menu">
+              <motion.div 
+                initial={{ opacity: 0, y: -4 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                exit={{ opacity: 0, y: -4 }} 
+                transition={{ duration: 0.15 }} 
+                className="response-dropdown-menu"
+                style={{ position: "fixed", zIndex: 9999 }}
+              >
                 {field.options?.map((option) => (
                   <button key={option} className={value === option ? "active" : ""} onClick={() => { onValue(option); setDropdownOpen(false); }}>
                     {option}
@@ -1592,7 +1669,7 @@ function ResponseField({
           {[1, 2, 3, 4, 5].map((star) => {
             const isActive = (hoverRating || Number(value || 0)) >= star;
             return (
-              <button key={star} type="button" onClick={() => onValue(star)} onMouseEnter={() => setHoverRating(star)} onMouseLeave={() => setHoverRating(0)} className={isActive ? "active" : ""}>
+              <button key={star} type="button" onClick={() => onValue(star)} onMouseEnter={() => setHoverRating(star)} onMouseLeave={() => setHoverRating(0)} className={isActive ? "active" : ""} aria-label={`Rate ${star} out of 5`}>
                 <Star size={32} fill={isActive ? "currentColor" : "none"} strokeWidth={1.5} />
               </button>
             );
@@ -1651,8 +1728,8 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
   const [viewType, setViewType] = useState<"grid" | "table">("table");
   const [statusOpen, setStatusOpen] = useState(false);
   const [priorityOpen, setPriorityOpen] = useState(false);
-  const statusRef = useRef<HTMLDivElement>(null);
-  const priorityRef = useRef<HTMLDivElement>(null);
+  const statusRef = useRef<HTMLButtonElement>(null);
+  const priorityRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -1794,14 +1871,21 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
         </div>
 
         <div className="dashboard-filters">
-          <div className="filter-dropdown" ref={statusRef}>
-            <button className="filter-dropdown-trigger" onClick={() => setStatusOpen(!statusOpen)}>
+          <div className="filter-dropdown">
+            <button ref={statusRef} className="filter-dropdown-trigger" onClick={() => setStatusOpen(!statusOpen)}>
               <Filter size={14} /> Status: <strong>{status === "all" ? "All" : status}</strong>
               <ChevronDown size={14} style={{ marginLeft: "auto", transform: statusOpen ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s" }} />
             </button>
             <AnimatePresence>
               {statusOpen && (
-                <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.15 }} className="filter-dropdown-menu">
+                <motion.div 
+                  initial={{ opacity: 0, y: -4 }} 
+                  animate={{ opacity: 1, y: 0 }} 
+                  exit={{ opacity: 0, y: -4 }} 
+                  transition={{ duration: 0.15 }} 
+                  className="filter-dropdown-menu"
+                  style={{ position: "fixed", zIndex: 9999 }}
+                >
                   {["all", "new", "reviewed", "prioritized", "archived"].map((s) => (
                     <button key={s} className={status === s ? "active" : ""} onClick={() => { setStatus(s); setStatusOpen(false); }}>
                       {s === "all" ? "All statuses" : s.charAt(0).toUpperCase() + s.slice(1)}
@@ -1812,14 +1896,21 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
             </AnimatePresence>
           </div>
 
-          <div className="filter-dropdown" ref={priorityRef}>
-            <button className="filter-dropdown-trigger" onClick={() => setPriorityOpen(!priorityOpen)}>
+          <div className="filter-dropdown">
+            <button ref={priorityRef} className="filter-dropdown-trigger" onClick={() => setPriorityOpen(!priorityOpen)}>
               <TrendingUp size={14} /> Priority: <strong>{priority === "all" ? "All" : priority}</strong>
               <ChevronDown size={14} style={{ marginLeft: "auto", transform: priorityOpen ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s" }} />
             </button>
             <AnimatePresence>
               {priorityOpen && (
-                <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.15 }} className="filter-dropdown-menu">
+                <motion.div 
+                  initial={{ opacity: 0, y: -4 }} 
+                  animate={{ opacity: 1, y: 0 }} 
+                  exit={{ opacity: 0, y: -4 }} 
+                  transition={{ duration: 0.15 }} 
+                  className="filter-dropdown-menu"
+                  style={{ position: "fixed", zIndex: 9999 }}
+                >
                   {["all", "low", "medium", "high"].map((p) => (
                     <button key={p} className={priority === p ? "active" : ""} onClick={() => { setPriority(p); setPriorityOpen(false); }}>
                       {p === "all" ? "All priorities" : p.charAt(0).toUpperCase() + p.slice(1)}
@@ -1848,23 +1939,23 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
       </div>
 
       {!submissions.length ? (
-        <div className="empty-state">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="empty-state">
           <div className="empty-state-icon"><MessageSquareText size={32} /></div>
           <h2>No submissions yet</h2>
           <p>Open the public form and send a test response.</p>
           <button className="primary" onClick={() => navigate(`/f/${activeForm.id}`)}>
             <ExternalLink size={16} /> Open public form
           </button>
-        </div>
+        </motion.div>
       ) : submissions.length > 0 && !filtered.length ? (
-        <div className="empty-state">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="empty-state">
           <div className="empty-state-icon"><AlertCircle size={32} /></div>
           <h2>No matching submissions</h2>
           <p>Clear filters or adjust your search query.</p>
           <button className="secondary" onClick={() => { setQuery(""); setStatus("all"); setPriority("all"); }}>
             <X size={16} /> Clear filters
           </button>
-        </div>
+        </motion.div>
       ) : viewType === "table" ? (
         <div className="submission-table-container">
           <table className="submission-table">
@@ -1955,9 +2046,10 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
 
 function StatusBadge({ value, onChange }: { value: Submission["status"]; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dropdownPos = useDropdownPosition(triggerRef, open);
   useEffect(() => {
-    function handleClick(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
+    function handleClick(e: MouseEvent) { if (triggerRef.current && !triggerRef.current.contains(e.target as Node)) setOpen(false); }
     if (open) document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
@@ -1969,13 +2061,20 @@ function StatusBadge({ value, onChange }: { value: Submission["status"]; onChang
   };
   const current = config[value] ?? config.new;
   return (
-    <div className="badge-dropdown" ref={ref}>
-      <button className={`badge ${current.class}`} onClick={() => setOpen(!open)}>
+    <div className="badge-dropdown">
+      <button ref={triggerRef} className={`badge ${current.class}`} onClick={() => setOpen(!open)}>
         {current.label} <ChevronDown size={12} />
       </button>
       <AnimatePresence>
         {open && (
-          <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.15 }} className="badge-dropdown-menu">
+          <motion.div 
+            initial={{ opacity: 0, y: -4 }} 
+            animate={{ opacity: 1, y: 0 }} 
+            exit={{ opacity: 0, y: -4 }} 
+            transition={{ duration: 0.15 }} 
+            className="badge-dropdown-menu"
+            style={{ position: "fixed", top: dropdownPos.top, left: dropdownPos.left, zIndex: 9999 }}
+          >
             {Object.entries(config).map(([key, cfg]) => (
               <button key={key} className={value === key ? "active" : ""} onClick={() => { onChange(key); setOpen(false); }}>
                 <span className={`dot ${cfg.class}`} /> {cfg.label}
@@ -1990,9 +2089,10 @@ function StatusBadge({ value, onChange }: { value: Submission["status"]; onChang
 
 function PriorityBadge({ value, onChange }: { value: Submission["priority"]; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dropdownPos = useDropdownPosition(triggerRef, open);
   useEffect(() => {
-    function handleClick(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
+    function handleClick(e: MouseEvent) { if (triggerRef.current && !triggerRef.current.contains(e.target as Node)) setOpen(false); }
     if (open) document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
@@ -2003,13 +2103,20 @@ function PriorityBadge({ value, onChange }: { value: Submission["priority"]; onC
   };
   const current = config[value] ?? config.medium;
   return (
-    <div className="badge-dropdown" ref={ref}>
-      <button className={`badge ${current.class}`} onClick={() => setOpen(!open)}>
+    <div className="badge-dropdown">
+      <button ref={triggerRef} className={`badge ${current.class}`} onClick={() => setOpen(!open)}>
         {current.label} <ChevronDown size={12} />
       </button>
       <AnimatePresence>
         {open && (
-          <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.15 }} className="badge-dropdown-menu">
+          <motion.div 
+            initial={{ opacity: 0, y: -4 }} 
+            animate={{ opacity: 1, y: 0 }} 
+            exit={{ opacity: 0, y: -4 }} 
+            transition={{ duration: 0.15 }} 
+            className="badge-dropdown-menu"
+            style={{ position: "fixed", top: dropdownPos.top, left: dropdownPos.left, zIndex: 9999 }}
+          >
             {Object.entries(config).map(([key, cfg]) => (
               <button key={key} className={value === key ? "active" : ""} onClick={() => { onChange(key); setOpen(false); }}>
                 <span className={`dot ${cfg.class}`} /> {cfg.label}
