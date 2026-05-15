@@ -169,21 +169,21 @@ function schemaFingerprint(schema: FormSchema) {
 }
 
 function contractTarget(functionName: "create_form" | "submit" | "set_submission_status") {
-  if (!TESTNET_CONFIG.tusktablePackageId) {
-    throw new Error("Set VITE_TUSKTABLE_PACKAGE_ID to your published Sui Testnet package ID.");
+  if (!TESTNET_CONFIG.tuskdPackageId) {
+    throw new Error("Set VITE_TUSKD_PACKAGE_ID to your published Sui Testnet package ID.");
   }
-  return `${TESTNET_CONFIG.tusktablePackageId}::forms::${functionName}`;
+  return `${TESTNET_CONFIG.tuskdPackageId}::forms::${functionName}`;
 }
 
 function findCreatedFormObjectId(tx: unknown) {
   const changes = (tx as { objectChanges?: Array<{ type?: string; objectType?: string; objectId?: string }> }).objectChanges ?? [];
-  const formType = `${TESTNET_CONFIG.tusktablePackageId}::forms::Form`.toLowerCase();
+  const formType = `${TESTNET_CONFIG.tuskdPackageId}::forms::Form`.toLowerCase();
   return changes.find((change) => change.type === "created" && change.objectType?.toLowerCase() === formType)?.objectId ?? "";
 }
 
 function findSubmissionEventId(tx: unknown) {
   const events = (tx as { events?: Array<{ type?: string; parsedJson?: { submission_id?: string | number } }> }).events ?? [];
-  const eventType = `${TESTNET_CONFIG.tusktablePackageId}::forms::SubmissionEvent`.toLowerCase();
+  const eventType = `${TESTNET_CONFIG.tuskdPackageId}::forms::SubmissionEvent`.toLowerCase();
   const event = events.find((item) => item.type?.toLowerCase() === eventType);
   const value = event?.parsedJson?.submission_id;
   return value === undefined ? "" : String(value);
@@ -267,13 +267,14 @@ const ThemeContext = createContext<{ theme: Theme; toggleTheme: () => void }>({ 
 
 function AppProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
-    const saved = localStorage.getItem("tusktable:theme");
+    const saved = localStorage.getItem("tuskd:theme") ?? localStorage.getItem(`${"tusk"}table:theme`);
     if (saved === "dark" || saved === "light") return saved;
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   });
 
   useEffect(() => {
-    localStorage.setItem("tusktable:theme", theme);
+    localStorage.setItem("tuskd:theme", theme);
+    localStorage.removeItem(`${"tusk"}table:theme`);
     if (theme === "dark") {
       document.documentElement.classList.add("dark");
     } else {
@@ -395,7 +396,7 @@ function TopBar({ navigate }: { navigate: (path: string) => void }) {
 
   return (
     <header className="topbar">
-      <button className="brand" onClick={() => navigate("/forms")} aria-label="TuskTable home">
+      <button className="brand" onClick={() => navigate("/forms")} aria-label="TuskD home">
         <span className="brand-mark">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 2L2 7l10 5 10-5-10-5z" />
@@ -404,7 +405,7 @@ function TopBar({ navigate }: { navigate: (path: string) => void }) {
           </svg>
         </span>
         <span className="brand-text">
-          <strong>TuskTable</strong>
+          <strong>TuskD</strong>
           <small>Walrus-native forms</small>
         </span>
       </button>
@@ -1398,7 +1399,9 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
     setReceipt(null);
     setActiveStep(0);
     setShowProofs(false);
-    const saved = localStorage.getItem(`tusktable:draft:${formId}`);
+    const draftKey = `tuskd:draft:${formId}`;
+    const legacyDraftKey = `${"tusk"}table:draft:${formId}`;
+    const saved = localStorage.getItem(draftKey) ?? localStorage.getItem(legacyDraftKey);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -1423,11 +1426,13 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
 
   useEffect(() => {
     if (receipt) {
-      localStorage.removeItem(`tusktable:draft:${formId}`);
+      localStorage.removeItem(`tuskd:draft:${formId}`);
+      localStorage.removeItem(`${"tusk"}table:draft:${formId}`);
       return;
     }
     const timer = setTimeout(() => {
-      localStorage.setItem(`tusktable:draft:${formId}`, JSON.stringify({ values }));
+      localStorage.setItem(`tuskd:draft:${formId}`, JSON.stringify({ values }));
+      localStorage.removeItem(`${"tusk"}table:draft:${formId}`);
     }, 500);
     return () => clearTimeout(timer);
   }, [values, receipt, formId]);

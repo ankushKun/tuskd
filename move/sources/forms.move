@@ -1,4 +1,4 @@
-module tusktable::forms {
+module tuskd::forms {
     use std::string::String;
     use sui::event;
 

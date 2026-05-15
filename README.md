@@ -1,4 +1,4 @@
-# Tuskd
+# TuskD
 
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=111)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=fff)](https://vite.dev/)
@@ -7,7 +7,7 @@
 [![Walrus](https://img.shields.io/badge/Walrus-Testnet-7C3AED)](https://www.walrus.xyz/)
 [![Move](https://img.shields.io/badge/Move-Smart%20Contract-111827)](https://move-language.github.io/move/)
 
-Tuskd is a wallet-native form platform for collecting structured responses, files, and review signals on Walrus and Sui Testnet. Creators build and publish forms, respondents submit through a public link, and each publish/submit/status update is backed by a real wallet-signed Sui transaction.
+TuskD is a wallet-native form platform for collecting structured responses, files, and review signals on Walrus and Sui Testnet. Creators build and publish forms, respondents submit through a public link, and each publish/submit/status update is backed by a real wallet-signed Sui transaction.
 
 ## Features
 
@@ -65,7 +65,7 @@ VITE_SUI_RPC_URL=https://fullnode.testnet.sui.io:443
 VITE_WALRUS_PUBLISHER=https://publisher.walrus-testnet.walrus.space
 VITE_WALRUS_AGGREGATOR=https://aggregator.walrus-testnet.walrus.space
 VITE_WALRUS_EPOCHS=5
-VITE_TUSKTABLE_PACKAGE_ID=0x593ad12342e188c4cde1d41b03ea8c740f4377d4586c8821f61482314616c0f3
+VITE_TUSKD_PACKAGE_ID=0x593ad12342e188c4cde1d41b03ea8c740f4377d4586c8821f61482314616c0f3
 ```
 
 `Walrus` and `Sui Testnet` calls are required. Upload or transaction failures stop the publish/submit flow instead of falling back to browser-only behavior.
@@ -102,7 +102,7 @@ cd move
 sui client publish --gas-budget 100000000
 ```
 
-After publishing, update `VITE_TUSKTABLE_PACKAGE_ID` with the new package ID.
+After publishing, update `VITE_TUSKD_PACKAGE_ID` with the new package ID.
 
 ## App Flow
 

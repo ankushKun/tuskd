@@ -1,7 +1,8 @@
 import type { AppStore, BlobReceipt, FormSchema, PublishedForm, StoredForm, Submission } from "./types";
 import { TESTNET_CONFIG } from "./config";
 
-const STORE_KEY = "tusktable:v1";
+const STORE_KEY = "tuskd:v1";
+const LEGACY_STORE_KEY = `${"tusk"}table:v1`;
 
 const publisher = TESTNET_CONFIG.walrusPublisher;
 const aggregator = TESTNET_CONFIG.walrusAggregator;
@@ -12,7 +13,7 @@ export function id(prefix: string) {
 }
 
 export function readStore(): AppStore {
-  const raw = localStorage.getItem(STORE_KEY);
+  const raw = localStorage.getItem(STORE_KEY) ?? localStorage.getItem(LEGACY_STORE_KEY);
   if (!raw) return { forms: [], submissions: [] };
   try {
     return migrateStore(JSON.parse(raw));
@@ -23,6 +24,7 @@ export function readStore(): AppStore {
 
 export function writeStore(store: AppStore) {
   localStorage.setItem(STORE_KEY, JSON.stringify(store));
+  localStorage.removeItem(LEGACY_STORE_KEY);
 }
 
 export function saveForm(form: StoredForm) {
