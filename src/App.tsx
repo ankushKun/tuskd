@@ -1536,7 +1536,6 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
           transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
         >
           <Lock size={10} strokeWidth={2.5} />
-          <span className="walrus-pill-label">Powered by {activeForm.schemaBlob?.storage === "walrus" ? "Walrus" : "Local"}</span>
           <AnimatePresence>
             {showProofs && (
               <motion.span
@@ -1546,7 +1545,6 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
                 exit={{ opacity: 0, width: 0 }}
                 transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
               >
-                <span className="walrus-expand-divider" />
                 <span className="walrus-expand-code">{activeForm.schemaBlob.id.slice(0, 16)}...</span>
                 {activeForm.txDigest && (
                   <a href={testnetTxUrl(activeForm.txDigest)} target="_blank" rel="noreferrer">View tx ↗</a>
@@ -1557,9 +1555,11 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
                 >
                   <Plus size={11} /> Create
                 </button>
+                <span className="walrus-expand-divider" />
               </motion.span>
             )}
           </AnimatePresence>
+          <span className="walrus-pill-label">Powered by {activeForm.schemaBlob?.storage === "walrus" ? "Walrus" : "Local"}</span>
         </motion.button>
       </footer>
     </div>
