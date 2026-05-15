@@ -46,7 +46,7 @@ import {
   Github,
   MoreHorizontal,
 } from "lucide-react";
-import React, { useEffect, useMemo, useState, createContext, useContext, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useState, createContext, useContext, useRef } from "react";
 import { toast } from "sonner";
 import {
   DndContext,
@@ -66,8 +66,9 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { motion, AnimatePresence } from "framer-motion";
-import { useCurrentAccount, useDisconnectWallet, useSignAndExecuteTransaction, useSuiClient, ConnectModal } from "@mysten/dapp-kit";
+import { useCurrentAccount, useCurrentWallet, useDisconnectWallet, useSignAndExecuteTransaction, useSuiClient, ConnectModal } from "@mysten/dapp-kit";
 import { Transaction } from "@mysten/sui/transactions";
+import { SUI_TESTNET_CHAIN } from "@mysten/wallet-standard";
 import { Sheet } from "./components/Sheet";
 import { AddFieldModal } from "./components/AddFieldModal";
 import { DropdownPortal } from "./components/DropdownPortal";
@@ -330,6 +331,29 @@ function lastSubmissionAt(formId: string) {
 }
 
 type Theme = "light" | "dark";
+type TestnetDialogState = {
+  walletName: string;
+  isPhantom: boolean;
+};
+
+const TestnetWalletContext = createContext<{ ensureTestnetWallet: () => Promise<boolean> }>({
+  ensureTestnetWallet: async () => true,
+});
+
+function walletAccountIsTestnetOnly(account: ReturnType<typeof useCurrentAccount>) {
+  const suiChains = (account?.chains ?? []).filter((chain) => chain.startsWith("sui:"));
+  return suiChains.length === 1 && suiChains[0] === SUI_TESTNET_CHAIN;
+}
+
+function isPhantomWallet(walletName: string) {
+  const phantomProvider = (window as unknown as { phantom?: { sui?: { isPhantom?: boolean } } }).phantom?.sui;
+  return walletName.toLowerCase().includes("phantom") || Boolean(phantomProvider?.isPhantom);
+}
+
+function useTestnetWalletGuard() {
+  return useContext(TestnetWalletContext);
+}
+
 function useDropdownPosition(triggerRef: React.RefObject<HTMLElement | null>, isOpen: boolean) {
   const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
   useEffect(() => {
@@ -370,6 +394,11 @@ function useMediaQuery(query: string) {
 const ThemeContext = createContext<{ theme: Theme; toggleTheme: () => void }>({ theme: "light", toggleTheme: () => {} });
 
 function AppProvider({ children }: { children: React.ReactNode }) {
+  const account = useCurrentAccount();
+  const currentWalletState = useCurrentWallet();
+  const pendingTestnetResolve = useRef<((confirmed: boolean) => void) | null>(null);
+  const pendingTestnetPromise = useRef<Promise<boolean> | null>(null);
+  const [testnetDialog, setTestnetDialog] = useState<TestnetDialogState | null>(null);
   const [theme, setTheme] = useState<Theme>(() => {
     const saved = localStorage.getItem("tuskd:theme") ?? localStorage.getItem(`${"tusk"}table:theme`);
     if (saved === "dark" || saved === "light") return saved;
@@ -387,11 +416,112 @@ function AppProvider({ children }: { children: React.ReactNode }) {
   }, [theme]);
 
   const toggleTheme = () => setTheme(current => current === "light" ? "dark" : "light");
+  const accountChainsKey = (account?.chains ?? []).join(",");
+  const walletName = currentWalletState.isConnected ? currentWalletState.currentWallet.name : "wallet";
+
+  const closeTestnetDialog = useCallback((confirmed: boolean) => {
+    const resolve = pendingTestnetResolve.current;
+    pendingTestnetResolve.current = null;
+    pendingTestnetPromise.current = null;
+    setTestnetDialog(null);
+    resolve?.(confirmed);
+  }, []);
+
+  const ensureTestnetWallet = useCallback(() => {
+    if (walletAccountIsTestnetOnly(account)) {
+      return Promise.resolve(true);
+    }
+    if (pendingTestnetPromise.current) {
+      return pendingTestnetPromise.current;
+    }
+
+    const promise = new Promise<boolean>((resolve) => {
+      pendingTestnetResolve.current = resolve;
+      setTestnetDialog({
+        walletName,
+        isPhantom: isPhantomWallet(walletName),
+      });
+    });
+    pendingTestnetPromise.current = promise;
+    return promise;
+  }, [account, accountChainsKey, walletName]);
+
+  const testnetWalletValue = useMemo(() => ({ ensureTestnetWallet }), [ensureTestnetWallet]);
 
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme }}>
-      {children}
+      <TestnetWalletContext.Provider value={testnetWalletValue}>
+        {children}
+        <TestnetWalletDialog state={testnetDialog} onCancel={() => closeTestnetDialog(false)} onContinue={() => closeTestnetDialog(true)} />
+      </TestnetWalletContext.Provider>
     </ThemeContext.Provider>
+  );
+}
+
+function TestnetWalletDialog({
+  state,
+  onCancel,
+  onContinue,
+}: {
+  state: TestnetDialogState | null;
+  onCancel: () => void;
+  onContinue: () => void;
+}) {
+  useEffect(() => {
+    if (!state) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onCancel();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [state, onCancel]);
+
+  const steps = state?.isPhantom
+    ? "In Phantom, select your profile avatar, open Settings, go to Developer Settings, turn on Testnet Mode, then switch Sui to Testnet before continuing."
+    : "Open your wallet network selector, choose Sui Testnet, then return here before continuing.";
+
+  return (
+    <AnimatePresence>
+      {state && (
+        <motion.div
+          className="testnet-dialog-backdrop"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.16 }}
+          onClick={onCancel}
+        >
+          <motion.div
+            className="testnet-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="testnet-dialog-title"
+            aria-describedby="testnet-dialog-body"
+            initial={{ opacity: 0, y: 18, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.98 }}
+            transition={{ duration: 0.18 }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="testnet-dialog-icon">
+              <Lock size={18} />
+            </div>
+            <div className="testnet-dialog-copy">
+              <p className="testnet-dialog-kicker">{state.walletName}</p>
+              <h2 id="testnet-dialog-title">Switch wallet to Sui Testnet</h2>
+              <p id="testnet-dialog-body">
+                TuskD currently runs on Sui Testnet and Walrus Testnet. Mainnet or devnet transactions will fail.
+              </p>
+              <p>{steps}</p>
+            </div>
+            <div className="testnet-dialog-actions">
+              <button className="secondary" onClick={onCancel}>Cancel</button>
+              <button className="primary" onClick={onContinue}>I am on Testnet, continue</button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 
@@ -1001,6 +1131,7 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
   const account = useCurrentAccount();
   const suiClient = useSuiClient();
   const signAndExecute = useSignAndExecuteTransaction();
+  const { ensureTestnetWallet } = useTestnetWalletGuard();
 
   const schemaIssues = useMemo(() => validateSchema(schema), [schema]);
   const issueByField = useMemo(() => {
@@ -1154,6 +1285,8 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
     }
     setBusy(true);
     try {
+      const canUseWallet = await ensureTestnetWallet();
+      if (!canUseWallet) return;
       contractTarget("create_form");
       const nextSchema = { ...schema, id: id("schema"), createdAt: new Date().toISOString() };
       const schemaBlob = await uploadJson(nextSchema, "form-schema.json");
@@ -1168,7 +1301,7 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
           tx.pure.string(schemaBlob.id),
         ],
       });
-      const txResult = await signAndExecute.mutateAsync({ transaction: tx });
+      const txResult = await signAndExecute.mutateAsync({ transaction: tx, chain: SUI_TESTNET_CHAIN });
       const txDetails = await suiClient.waitForTransaction({
         digest: txResult.digest,
         options: { showObjectChanges: true },
@@ -1779,6 +1912,7 @@ function PublicFormLoaded({ form, formId, navigate }: { form: StoredForm; formId
   const account = useCurrentAccount();
   const suiClient = useSuiClient();
   const signAndExecute = useSignAndExecuteTransaction();
+  const { ensureTestnetWallet } = useTestnetWalletGuard();
 
   useEffect(() => {
     setErrors({});
@@ -1905,6 +2039,8 @@ function PublicFormLoaded({ form, formId, navigate }: { form: StoredForm; formId
 
     setBusy(true);
     try {
+      const canUseWallet = await ensureTestnetWallet();
+      if (!canUseWallet) return;
       contractTarget("submit");
       const media: Record<string, BlobReceipt> = {};
       for (const [fieldId, file] of Object.entries(files)) {
@@ -1928,7 +2064,7 @@ function PublicFormLoaded({ form, formId, navigate }: { form: StoredForm; formId
           tx.pure.vector("string", Object.values(media).map((receipt) => receipt.id)),
         ],
       });
-      const txResult = await signAndExecute.mutateAsync({ transaction: tx });
+      const txResult = await signAndExecute.mutateAsync({ transaction: tx, chain: SUI_TESTNET_CHAIN });
       const txDetails = await suiClient.waitForTransaction({
         digest: txResult.digest,
         options: { showEvents: true },
@@ -2366,6 +2502,7 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
   const priorityPos = useDropdownPosition(priorityRef, priorityOpen);
   const account = useCurrentAccount();
   const signAndExecute = useSignAndExecuteTransaction();
+  const { ensureTestnetWallet } = useTestnetWalletGuard();
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -2431,6 +2568,8 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
     }
     const next = { ...submission, ...patch };
     try {
+      const canUseWallet = await ensureTestnetWallet();
+      if (!canUseWallet) return;
       const tx = new Transaction();
       tx.moveCall({
         target: contractTarget("set_submission_status"),
@@ -2441,7 +2580,7 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
           tx.pure.u8(priorityCode[next.priority]),
         ],
       });
-      await signAndExecute.mutateAsync({ transaction: tx });
+      await signAndExecute.mutateAsync({ transaction: tx, chain: SUI_TESTNET_CHAIN });
       updateSubmission(next);
       setSubmissions(getSubmissions(formId));
       toast.success("Response status updated on Sui Testnet");
