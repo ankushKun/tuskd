@@ -1042,10 +1042,11 @@ function FieldEditorInline({ field, updateField }: { field: Field, updateField: 
         </button>
         <AnimatePresence>
           {selectOpen && (
-            <motion.div 
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.12 }}
               className="field-custom-select-dropdown"
               style={{ position: "fixed", top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width, zIndex: 9999 }}
             >
@@ -1628,10 +1629,10 @@ function ResponseField({
           <AnimatePresence>
             {dropdownOpen && (
               <motion.div 
-                initial={{ opacity: 0, y: -4 }} 
-                animate={{ opacity: 1, y: 0 }} 
-                exit={{ opacity: 0, y: -4 }} 
-                transition={{ duration: 0.15 }} 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.12 }}
                 className="response-dropdown-menu"
                 style={{ position: "fixed", zIndex: 9999 }}
               >
@@ -1879,10 +1880,10 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
             <AnimatePresence>
               {statusOpen && (
                 <motion.div 
-                  initial={{ opacity: 0, y: -4 }} 
-                  animate={{ opacity: 1, y: 0 }} 
-                  exit={{ opacity: 0, y: -4 }} 
-                  transition={{ duration: 0.15 }} 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.12 }}
                   className="filter-dropdown-menu"
                   style={{ position: "fixed", zIndex: 9999 }}
                 >
@@ -1904,10 +1905,10 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
             <AnimatePresence>
               {priorityOpen && (
                 <motion.div 
-                  initial={{ opacity: 0, y: -4 }} 
-                  animate={{ opacity: 1, y: 0 }} 
-                  exit={{ opacity: 0, y: -4 }} 
-                  transition={{ duration: 0.15 }} 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.12 }}
                   className="filter-dropdown-menu"
                   style={{ position: "fixed", zIndex: 9999 }}
                 >
@@ -2068,10 +2069,10 @@ function StatusBadge({ value, onChange }: { value: Submission["status"]; onChang
       <AnimatePresence>
         {open && (
           <motion.div 
-            initial={{ opacity: 0, y: -4 }} 
-            animate={{ opacity: 1, y: 0 }} 
-            exit={{ opacity: 0, y: -4 }} 
-            transition={{ duration: 0.15 }} 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.12 }}
             className="badge-dropdown-menu"
             style={{ position: "fixed", top: dropdownPos.top, left: dropdownPos.left, zIndex: 9999 }}
           >
@@ -2110,10 +2111,10 @@ function PriorityBadge({ value, onChange }: { value: Submission["priority"]; onC
       <AnimatePresence>
         {open && (
           <motion.div 
-            initial={{ opacity: 0, y: -4 }} 
-            animate={{ opacity: 1, y: 0 }} 
-            exit={{ opacity: 0, y: -4 }} 
-            transition={{ duration: 0.15 }} 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.12 }}
             className="badge-dropdown-menu"
             style={{ position: "fixed", top: dropdownPos.top, left: dropdownPos.left, zIndex: 9999 }}
           >
