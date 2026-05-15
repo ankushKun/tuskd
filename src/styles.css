@@ -175,12 +175,299 @@ code {
   background: var(--bg-muted);
 }
 
-.builder-layout {
-  display: grid;
-  grid-template-columns: 280px minmax(0, 1fr) 340px;
-  gap: 16px;
-  padding: 18px;
+.builder-container {
+  display: flex;
+  flex-direction: column;
   min-height: calc(100vh - 65px);
+  background: var(--bg);
+}
+
+.builder-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 65px;
+  z-index: 20;
+}
+
+.builder-header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 1;
+}
+
+.back-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+}
+.back-btn:hover {
+  background: var(--bg-muted);
+  color: var(--fg);
+}
+
+.builder-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.builder-title {
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--fg);
+  padding: 4px 8px;
+  margin-left: -8px;
+  border-radius: var(--radius-sm);
+}
+.builder-title:hover, .builder-title:focus {
+  background: var(--bg-muted);
+  outline: none;
+}
+
+.save-status {
+  font-size: 11px;
+  padding-left: 4px;
+  color: var(--fg-muted);
+}
+.save-status.dirty {
+  color: #d97821;
+}
+
+.builder-tabs {
+  display: flex;
+  background: var(--bg-muted);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  gap: 4px;
+}
+.builder-tabs button {
+  border: none;
+  background: transparent;
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+.builder-tabs button.active {
+  background: var(--bg-panel);
+  color: var(--fg);
+  box-shadow: var(--shadow-color) 0px 2px 4px;
+}
+
+.builder-header-right {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  flex: 1;
+}
+
+.builder-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 20px;
+}
+
+.builder-canvas {
+  width: 100%;
+  max-width: 760px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.builder-desc {
+  border: none;
+  background: transparent;
+  font-size: 16px;
+  color: var(--fg-muted);
+  resize: none;
+  padding: 8px;
+  margin-left: -8px;
+  border-radius: var(--radius-sm);
+  min-height: 48px;
+  margin-bottom: 24px;
+}
+.builder-desc:hover, .builder-desc:focus {
+  background: var(--bg-muted);
+  outline: none;
+}
+
+/* Inline Add Field Button */
+.add-field-container {
+  display: flex;
+  justify-content: center;
+  position: relative;
+  height: 24px;
+  margin: -6px 0;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 5;
+}
+.add-field-container.bottom {
+  opacity: 1;
+  height: auto;
+  margin: 32px 0;
+}
+.builder-canvas:hover .add-field-container, .add-field-container:focus-within {
+  opacity: 1;
+}
+.add-field-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  padding: 4px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  box-shadow: var(--shadow-float);
+  transform: translateY(-50%);
+}
+.add-field-container.bottom .add-field-btn {
+  transform: none;
+  padding: 12px 24px;
+  font-size: 15px;
+}
+.add-field-btn:hover {
+  background: var(--primary);
+  color: var(--primary-fg);
+  border-color: var(--primary);
+}
+
+.field-type-popover {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 20px 40px var(--shadow-color);
+  width: 320px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  z-index: 50;
+  margin-top: -12px;
+}
+.add-field-container.bottom .field-type-popover {
+  margin-top: 8px;
+}
+.field-type-popover button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--bg-muted);
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+}
+.field-type-popover button:hover {
+  background: var(--bg-accent);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* Inline Field Editor Shell */
+.inline-field-shell {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 24px;
+  position: relative;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+.inline-field-shell.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--bg-accent);
+}
+.inline-field-shell.has-issue {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-bg);
+}
+
+.field-actions-toolbar {
+  position: absolute;
+  top: -16px;
+  right: 24px;
+  display: flex;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  box-shadow: var(--shadow-float);
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 10;
+}
+.inline-field-shell:hover .field-actions-toolbar,
+.inline-field-shell:focus-within .field-actions-toolbar {
+  opacity: 1;
+}
+.field-actions-toolbar button, .field-actions-toolbar .drag-handle-inline {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.field-actions-toolbar .drag-handle-inline {
+  cursor: grab;
+}
+.field-actions-toolbar button:hover, .field-actions-toolbar .drag-handle-inline:hover {
+  background: var(--bg-muted);
+  color: var(--fg);
+}
+.field-actions-toolbar button.danger:hover {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.inline-field-editor-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--border);
+}
+
+.builder-settings-panel {
+  width: 100%;
+  max-width: 600px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }
 
 .palette,

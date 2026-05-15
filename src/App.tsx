@@ -34,7 +34,7 @@ import {
   ArrowLeft,
   ArrowRight,
 } from "lucide-react";
-import { useEffect, useMemo, useState, createContext, useContext } from "react";
+import React, { useEffect, useMemo, useState, createContext, useContext } from "react";
 import { toast } from "sonner";
 import {
   DndContext,
@@ -53,6 +53,7 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { motion, AnimatePresence } from "framer-motion";
 import type { BlobReceipt, Field, FieldType, FormSchema, StoredForm, Submission } from "./types";
 import { TESTNET_CONFIG, testnetTxUrl } from "./config";
 import {
@@ -292,6 +293,14 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
     window.setTimeout(() => setCopiedId(""), 1600);
   }
 
+  function handleDelete(formId: string) {
+    if (window.confirm("Are you sure you want to delete this form and all its responses?")) {
+      deleteForm(formId);
+      setForms(getForms());
+      toast.success("Form deleted");
+    }
+  }
+
   return (
     <section className="forms-home">
       <div className="forms-hero">
@@ -400,10 +409,9 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
   const [schema, setSchema] = useState<FormSchema>(() => getForm(formId ?? "")?.draftSchema ?? createDefaultSchema());
   const [selectedId, setSelectedId] = useState(schema.fields[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
-  const [publishError, setPublishError] = useState("");
+  const [activeTab, setActiveTab] = useState<"build" | "settings" | "preview">("build");
   const [copied, setCopied] = useState(false);
 
-  const selected = schema.fields.find((field) => field.id === selectedId) ?? schema.fields[0];
   const schemaIssues = useMemo(() => validateSchema(schema), [schema]);
   const issueByField = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -414,7 +422,6 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
     return map;
   }, [schemaIssues]);
   const dirtySincePublish = Boolean(form?.schema && schemaFingerprint(form.schema) !== schemaFingerprint(schema));
-  const canShare = Boolean(form?.status === "published" && form.schemaBlob && form.txDigest);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -462,9 +469,13 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
     setForm(saveDraftForm(form.id, schema));
   }, [schema]);
 
-  function addField(type: FieldType) {
+  function insertField(type: FieldType, index: number) {
     const field = createField(type);
-    setSchema((current) => ({ ...current, fields: [...current.fields, field] }));
+    setSchema((current) => {
+      const fields = [...current.fields];
+      fields.splice(index, 0, field);
+      return { ...current, fields };
+    });
     setSelectedId(field.id);
   }
 
@@ -478,7 +489,7 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
   function removeField(fieldId: string) {
     setSchema((current) => {
       const fields = current.fields.filter((field) => field.id !== fieldId);
-      setSelectedId(fields[0]?.id ?? "");
+      if (selectedId === fieldId) setSelectedId(fields[0]?.id ?? "");
       return { ...current, fields };
     });
   }
@@ -496,24 +507,9 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
     setSelectedId(copyField.id);
   }
 
-  function moveField(fieldId: string, direction: -1 | 1) {
-    setSchema((current) => {
-      const from = current.fields.findIndex((field) => field.id === fieldId);
-      const to = from + direction;
-      if (from < 0 || to < 0 || to >= current.fields.length) return current;
-      const fields = [...current.fields];
-      const [moved] = fields.splice(from, 1);
-      fields.splice(to, 0, moved);
-      return { ...current, fields };
-    });
-    setSelectedId(fieldId);
-  }
-
   async function publish() {
-    setPublishError("");
     if (schemaIssues.length) {
       toast.error("Fix the highlighted field issues before publishing.");
-      setPublishError("Fix the highlighted field issues before publishing.");
       return;
     }
     setBusy(true);
@@ -528,7 +524,6 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
       if (!formId) navigate(`/builder/${publishedForm.id}`);
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Unable to publish this form.";
-      setPublishError(msg);
       toast.error(msg);
     } finally {
       setBusy(false);
@@ -536,7 +531,7 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
   }
 
   function copyShareLink() {
-    if (!canShare || !form) return;
+    if (form?.status !== "published") return;
     copy(`${window.location.origin}/f/${form.id}`);
     setCopied(true);
     toast.success("Link copied to clipboard");
@@ -544,178 +539,134 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
   }
 
   return (
-    <section className="builder-layout">
-      <aside className="palette">
-        <div>
-          <p className="eyebrow">Create</p>
-          <h1>Airtable-style forms, stored on Walrus.</h1>
-          <p className="muted">Publish a real feedback form in minutes, then review submissions with Walrus blob proofs.</p>
-        </div>
-        <div className="network-card">
-          <span>Sui {TESTNET_CONFIG.suiNetwork}</span>
-          <code>{TESTNET_CONFIG.suiRpcUrl}</code>
-          <span>Walrus testnet</span>
-          <code>{TESTNET_CONFIG.walrusPublisher}</code>
-        </div>
-        <div className="template-card">
-          <Sparkles size={18} />
-          <div>
-            <strong>Editable starter form</strong>
-            <span>Three placeholder fields are ready. Drag them up or down to reorder.</span>
+    <div className="builder-container">
+      <header className="builder-header">
+        <div className="builder-header-left">
+          <button onClick={() => navigate("/forms")} className="back-btn"><ArrowLeft size={18}/></button>
+          <div className="builder-title-group">
+            <input className="builder-title" value={schema.title} onChange={e => setSchema({...schema, title: e.target.value})} placeholder="Form Title" />
+            <span className={`save-status ${dirtySincePublish ? 'dirty' : ''}`}>{dirtySincePublish ? "Unsaved edits" : "Saved"}</span>
           </div>
         </div>
-        <div className={`health-card ${schemaIssues.length ? "warn" : "ok"}`}>
-          {schemaIssues.length ? <AlertCircle size={17} /> : <Check size={17} />}
-          <span>{schemaIssues.length ? `${schemaIssues.length} issue${schemaIssues.length === 1 ? "" : "s"} before publish` : "Ready to publish"}</span>
+        <div className="builder-tabs">
+          <button className={activeTab === "build" ? "active" : ""} onClick={() => setActiveTab("build")}>Build</button>
+          <button className={activeTab === "settings" ? "active" : ""} onClick={() => setActiveTab("settings")}>Settings</button>
+          <button className={activeTab === "preview" ? "active" : ""} onClick={() => setActiveTab("preview")}>Preview</button>
         </div>
-        <div className="field-palette">
-          {fieldTypes.map((item) => (
-            <button key={item.type} onClick={() => addField(item.type)}>
-              <item.icon size={17} />
-              {item.label}
-              <Plus size={15} />
-            </button>
-          ))}
-        </div>
-      </aside>
-
-      <section className="canvas">
-        <div className="canvas-toolbar">
-          <div>
-            <input
-              className="title-input"
-              value={schema.title}
-              onChange={(event) => setSchema({ ...schema, title: event.target.value })}
-            />
-            <textarea
-              className="description-input"
-              value={schema.description}
-              onChange={(event) => setSchema({ ...schema, description: event.target.value })}
-            />
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-end" }}>
-            <label className="switch-row">
-              <input
-                type="checkbox"
-                checked={schema.encrypted}
-                onChange={(event) => setSchema({ ...schema, encrypted: event.target.checked })}
-              />
-              <span>
-                <Lock size={15} />
-                Seal private mode
-              </span>
-            </label>
-            <div className="view-toggle">
-              <button 
-                className={schema.layout !== "slides" ? "active" : ""} 
-                onClick={() => setSchema({ ...schema, layout: "standard" })}
-                title="Standard Layout"
-                aria-label="Standard Layout"
-              >
-                <LayoutList size={16} />
-              </button>
-              <button 
-                className={schema.layout === "slides" ? "active" : ""} 
-                onClick={() => setSchema({ ...schema, layout: "slides" })}
-                title="Slides Layout"
-                aria-label="Slides Layout"
-              >
-                <LayoutTemplate size={16} />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="form-preview">
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={schema.fields.map((f) => f.id)} strategy={verticalListSortingStrategy}>
-              {schema.fields.map((field, index) => (
-                <SortableField
-                  key={field.id}
-                  field={field}
-                  index={index}
-                  isSelected={field.id === selected?.id}
-                  issue={issueByField.get(field.id)}
-                  totalFields={schema.fields.length}
-                  onSelect={() => setSelectedId(field.id)}
-                  onMove={moveField}
-                />
-              ))}
-            </SortableContext>
-          </DndContext>
-        </div>
-      </section>
-
-      <aside className="inspector">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Publish</p>
-            <h2>Submission rail</h2>
-          </div>
-          <button className="primary icon-left" onClick={publish} disabled={busy || schemaIssues.length > 0}>
-            <Send size={16} />
-            {busy ? "Publishing" : canShare ? "Republish" : "Publish"}
+        <div className="builder-header-right">
+          {form?.status === "published" && (
+             <button className="secondary" onClick={copyShareLink}>
+               {copied ? <Check size={15}/> : <LinkIcon size={15}/>} Share
+             </button>
+          )}
+          <button className="primary" onClick={publish} disabled={busy || schemaIssues.length > 0}>
+             {busy ? "Publishing..." : (form?.status === "published" && !dirtySincePublish ? "Published" : "Publish")}
           </button>
         </div>
+      </header>
 
-        {publishError ? (
-          <div className="error-banner">
-            <AlertCircle size={16} />
-            {publishError}
-          </div>
-        ) : null}
-
-        {schemaIssues.length ? (
-          <div className="issue-list">
-            <strong>Fix before publishing</strong>
-            {schemaIssues.slice(0, 5).map((issue) => (
-              <button key={`${issue.fieldId ?? "form"}-${issue.message}`} onClick={() => issue.fieldId && setSelectedId(issue.fieldId)}>
-                <AlertCircle size={14} />
-                {issue.message}
-              </button>
-            ))}
-          </div>
-        ) : null}
-
-        {canShare && form?.schemaBlob && form.txDigest ? (
-          <div className="receipt">
-            <div className={`status-dot ${dirtySincePublish ? "warn" : ""}`}>{dirtySincePublish ? "Unsaved edits" : "Live"}</div>
-            <p>Schema blob</p>
-            <code>{form.schemaBlob.id}</code>
-            {form.schemaBlob.storage === "local" ? (
-              <div className="warning-note">
-                <AlertCircle size={15} />
-                Local fallback is not publicly shareable across browsers.
-              </div>
-            ) : null}
-            <p>Sui testnet transaction</p>
-            <a className="proof-link" href={testnetTxUrl(form.txDigest)} target="_blank" rel="noreferrer">
-              {form.txDigest}
-            </a>
-            <div className="split-actions">
-              <button onClick={copyShareLink}>
-                {copied ? <Check size={15} /> : <Clipboard size={15} />}
-                {copied ? "Copied" : "Copy form"}
-              </button>
-              <button onClick={() => navigate(`/admin/${form.id}`)}>
-                <Table2 size={15} />
-                Admin
-              </button>
-            </div>
-            <button className="secondary full" onClick={() => navigate(`/f/${form.id}`)}>
-              Open share link
-              <ChevronRight size={16} />
-            </button>
-          </div>
-        ) : null}
-
-        {selected ? (
-          <FieldEditor field={selected} updateField={updateField} removeField={removeField} duplicateField={duplicateField} issues={issueByField.get(selected.id) ?? []} />
-        ) : (
-          <p className="muted">Add a field to edit its settings.</p>
+      <main className="builder-main">
+        {activeTab === "build" && (
+           <div className="builder-canvas">
+             <textarea className="builder-desc" value={schema.description} onChange={e => setSchema({...schema, description: e.target.value})} placeholder="Form description or instructions..." />
+             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+               <SortableContext items={schema.fields.map(f => f.id)} strategy={verticalListSortingStrategy}>
+                 {schema.fields.map((field, index) => (
+                   <React.Fragment key={field.id}>
+                     <AddFieldButton onSelect={(type) => insertField(type, index)} />
+                     <SortableField 
+                       field={field} 
+                       index={index} 
+                       isSelected={selectedId === field.id}
+                       onSelect={() => setSelectedId(field.id)}
+                       onUpdate={(patch) => updateField(field.id, patch)}
+                       onRemove={() => removeField(field.id)}
+                       onDuplicate={() => duplicateField(field.id)}
+                       issue={issueByField.get(field.id)}
+                     />
+                   </React.Fragment>
+                 ))}
+                 <AddFieldButton onSelect={(type) => insertField(type, schema.fields.length)} isBottom />
+               </SortableContext>
+             </DndContext>
+           </div>
         )}
-      </aside>
-    </section>
+        {activeTab === "settings" && (
+          <div className="builder-settings-panel">
+            <div>
+              <p className="eyebrow">Privacy</p>
+              <h2>End-to-End Encryption</h2>
+              <label className="switch-row" style={{marginTop: 12}}>
+                <input
+                  type="checkbox"
+                  checked={schema.encrypted}
+                  onChange={(event) => setSchema({ ...schema, encrypted: event.target.checked })}
+                />
+                <span><Lock size={15} /> Seal private mode (Payloads encrypted before Walrus upload)</span>
+              </label>
+            </div>
+            
+            <div style={{marginTop: 12}}>
+              <p className="eyebrow">Presentation</p>
+              <h2>Form Layout</h2>
+              <div className="view-toggle" style={{width: 'fit-content', marginTop: 12}}>
+                <button 
+                  className={schema.layout !== "slides" ? "active" : ""} 
+                  onClick={() => setSchema({ ...schema, layout: "standard" })}
+                  title="Standard Layout"
+                  style={{padding: '8px 16px', width: 'auto'}}
+                >
+                  <LayoutList size={16} style={{marginRight: 8}} /> Standard
+                </button>
+                <button 
+                  className={schema.layout === "slides" ? "active" : ""} 
+                  onClick={() => setSchema({ ...schema, layout: "slides" })}
+                  title="Slides Layout"
+                  style={{padding: '8px 16px', width: 'auto'}}
+                >
+                  <LayoutTemplate size={16} style={{marginRight: 8}} /> Slides
+                </button>
+              </div>
+            </div>
+
+            {schemaIssues.length > 0 && (
+              <div style={{marginTop: 12}}>
+                <p className="eyebrow">Validation</p>
+                <h2>Fix before publishing</h2>
+                <div className="issue-list" style={{marginTop: 12}}>
+                  {schemaIssues.map((issue) => (
+                    <button key={`${issue.fieldId ?? "form"}-${issue.message}`} onClick={() => { setActiveTab("build"); if (issue.fieldId) setSelectedId(issue.fieldId); }}>
+                      <AlertCircle size={14} />
+                      {issue.message}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {form?.status === "published" && form.schemaBlob && form.txDigest && (
+              <div style={{marginTop: 12}}>
+                <p className="eyebrow">Blockchain Proofs</p>
+                <h2>Receipts</h2>
+                <div className="receipt" style={{marginTop: 12}}>
+                  <p>Schema blob</p>
+                  <code>{form.schemaBlob.id}</code>
+                  <p>Sui testnet transaction</p>
+                  <a className="proof-link" href={testnetTxUrl(form.txDigest)} target="_blank" rel="noreferrer">
+                    {form.txDigest}
+                  </a>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {activeTab === "preview" && (
+           <div className="public-wrap" style={{width: '100%', margin: 0, border: '1px solid var(--border)'}}>
+             <PublicFormPreview schema={schema} />
+           </div>
+        )}
+      </main>
+    </div>
   );
 }
 
@@ -724,17 +675,19 @@ function SortableField({
   index,
   isSelected,
   issue,
-  totalFields,
   onSelect,
-  onMove,
+  onUpdate,
+  onRemove,
+  onDuplicate
 }: {
   field: Field;
   index: number;
   isSelected: boolean;
   issue?: string[];
-  totalFields: number;
   onSelect: () => void;
-  onMove: (fieldId: string, direction: -1 | 1) => void;
+  onUpdate: (patch: Partial<Field>) => void;
+  onRemove: () => void;
+  onDuplicate: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.id });
   const style = {
@@ -744,185 +697,128 @@ function SortableField({
   };
 
   return (
-    <article
-      ref={setNodeRef}
-      style={style}
-      className={`field-shell ${isSelected ? "selected" : ""} ${isDragging ? "dragging" : ""} ${issue?.length ? "has-issue" : ""}`}
-      onClick={onSelect}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") onSelect();
-      }}
-      role="button"
-      tabIndex={0}
-    >
-      <span className="drag-handle" aria-label="Drag to reorder" {...attributes} {...listeners}>
-        <GripVertical size={17} />
-      </span>
-      <span className="field-number">{index + 1}</span>
-      <FieldPreview field={field} issues={issue ?? []} />
-      <div className="reorder-actions">
-        <button
-          aria-label="Move field up"
-          disabled={index === 0}
-          onClick={(event) => {
-            event.stopPropagation();
-            onMove(field.id, -1);
-          }}
-        >
-          <ArrowUp size={15} />
-        </button>
-        <button
-          aria-label="Move field down"
-          disabled={index === totalFields - 1}
-          onClick={(event) => {
-            event.stopPropagation();
-            onMove(field.id, 1);
-          }}
-        >
-          <ArrowDown size={15} />
-        </button>
+    <div ref={setNodeRef} style={style}>
+      <div 
+        className={`inline-field-shell ${isSelected ? "selected" : ""} ${issue?.length ? "has-issue" : ""}`}
+        onClick={() => !isSelected && onSelect()}
+      >
+        <div className="field-actions-toolbar">
+          <div className="drag-handle-inline" {...attributes} {...listeners}><GripVertical size={16}/></div>
+          <button onClick={(e) => { e.stopPropagation(); onDuplicate(); }}><Copy size={16}/></button>
+          <button className="danger" onClick={(e) => { e.stopPropagation(); onRemove(); }}><Trash2 size={16}/></button>
+        </div>
+        
+        {isSelected ? (
+          <motion.div initial={{opacity: 0, height: 0}} animate={{opacity: 1, height: "auto"}} transition={{duration: 0.2}}>
+            <div style={{display: 'flex', gap: 12, alignItems: 'center'}}>
+               <span className="field-number">{index + 1}</span>
+               <input 
+                 className="title-input" 
+                 style={{fontSize: 20, padding: 0, flex: 1}} 
+                 value={field.label} 
+                 onChange={e => onUpdate({label: e.target.value})} 
+                 placeholder="Question..." 
+                 autoFocus
+               />
+            </div>
+            <div className="inline-field-editor-content">
+               <textarea 
+                 className="description-input" 
+                 style={{minHeight: 32, marginTop: 0}} 
+                 value={field.helper ?? ""} 
+                 onChange={e => onUpdate({helper: e.target.value})} 
+                 placeholder="Description or instructions (optional)..."
+               />
+               <FieldEditorInline field={field} updateField={onUpdate} />
+               <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12}}>
+                 <label className="switch-row" style={{display: 'flex', alignItems: 'center'}}>
+                   <input type="checkbox" checked={field.required} onChange={e => onUpdate({required: e.target.checked})} style={{width: 'auto'}} />
+                   <span style={{fontWeight: 600}}>Required</span>
+                 </label>
+                 {issue && issue.length > 0 && (
+                   <span style={{color: 'var(--danger)', fontSize: 13, fontWeight: 600}}><AlertCircle size={14} style={{display: 'inline', verticalAlign: 'middle', marginRight: 4}}/>{issue[0]}</span>
+                 )}
+               </div>
+            </div>
+          </motion.div>
+        ) : (
+          <div style={{pointerEvents: 'none'}}>
+            <div style={{display: 'flex', gap: 12, alignItems: 'flex-start'}}>
+               <span className="field-number">{index + 1}</span>
+               <FieldPreview field={field} issues={issue ?? []} />
+            </div>
+          </div>
+        )}
       </div>
-    </article>
-  );
+    </div>
+  )
 }
 
-function FieldEditor({
-  field,
-  updateField,
-  removeField,
-  duplicateField,
-  issues,
-}: {
-  field: Field;
-  updateField: (fieldId: string, patch: Partial<Field>) => void;
-  removeField: (fieldId: string) => void;
-  duplicateField: (fieldId: string) => void;
-  issues: string[];
-}) {
+function FieldEditorInline({ field, updateField }: { field: Field, updateField: (p: Partial<Field>) => void }) {
   const options = field.options ?? [];
   const usesOptions = field.type === "dropdown" || field.type === "checkboxes";
 
-  function changeType(nextType: FieldType) {
-    updateField(field.id, {
-      type: nextType,
-      options: nextType === "dropdown" || nextType === "checkboxes" ? normalizeOptions(options).length ? normalizeOptions(options) : ["Option A", "Option B"] : undefined,
-    });
-  }
-
-  function updateOption(index: number, value: string) {
-    const nextOptions = options.length ? [...options] : [""];
-    nextOptions[index] = value;
-    updateField(field.id, { options: nextOptions });
-  }
-
-  function addOption() {
-    updateField(field.id, { options: [...options, `Option ${options.length + 1}`] });
-  }
-
-  function removeOption(index: number) {
-    updateField(field.id, { options: options.filter((_, optionIndex) => optionIndex !== index) });
-  }
-
-  function dedupeOptions() {
-    const seen = new Set<string>();
-    updateField(field.id, {
-      options: normalizeOptions(options).filter((option) => {
-        const key = option.toLowerCase();
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      }),
-    });
-  }
-
   return (
-    <div className="editor">
-      <div className="panel-header compact">
-        <div>
-          <p className="eyebrow">Field</p>
-          <h2>{fieldTypes.find((item) => item.type === field.type)?.label}</h2>
-        </div>
-        <button className="danger-icon" onClick={() => removeField(field.id)} aria-label="Remove field">
-          <Trash2 size={16} />
-        </button>
-      </div>
-      {issues.length ? (
-        <div className="inline-issues">
-          {issues.map((issue) => (
-            <span key={issue}>
-              <AlertCircle size={14} />
-              {issue}
-            </span>
-          ))}
-        </div>
-      ) : null}
-      <label>
-        Type
-        <select value={field.type} onChange={(event) => changeType(event.target.value as FieldType)}>
-          {fieldTypes.map((item) => (
-            <option key={item.type} value={item.type}>
-              {item.label}
-            </option>
-          ))}
+    <div style={{display: 'flex', flexDirection: 'column', gap: 16}}>
+      <div>
+        <label style={{fontSize: 12, fontWeight: 800, color: 'var(--fg-muted)', textTransform: 'uppercase'}}>Field Type</label>
+        <select className="secondary" value={field.type} onChange={(e) => updateField({type: e.target.value as FieldType, options: (e.target.value === "dropdown" || e.target.value === "checkboxes") ? (options.length ? options : ["Option 1", "Option 2"]) : undefined})} style={{marginTop: 6, width: '100%', minHeight: 40}}>
+           {fieldTypes.map(item => <option key={item.type} value={item.type}>{item.label}</option>)}
         </select>
-      </label>
-      <p className="field-hint">{fieldHint(field.type)}</p>
-      <label>
-        Label
-        <input value={field.label} onChange={(event) => updateField(field.id, { label: event.target.value })} />
-      </label>
-      <label>
-        Helper text
-        <textarea value={field.helper ?? ""} onChange={(event) => updateField(field.id, { helper: event.target.value })} />
-      </label>
-      <label className="checkbox-line">
-        <input
-          type="checkbox"
-          checked={field.required}
-          onChange={(event) => updateField(field.id, { required: event.target.checked })}
-        />
-        Required
-      </label>
-      {usesOptions ? (
-        <div className="option-editor">
-          <div className="option-header">
-            <strong>Options</strong>
-            <button onClick={dedupeOptions} type="button">Dedupe</button>
-          </div>
-          {(options.length ? options : [""]).map((option, index) => (
-            <div className="option-row" key={index}>
-              <input value={option} onChange={(event) => updateOption(index, event.target.value)} placeholder={`Option ${index + 1}`} />
-              <button type="button" onClick={() => removeOption(index)} aria-label="Remove option">
-                <X size={15} />
-              </button>
-            </div>
-          ))}
-          <button className="secondary full" type="button" onClick={addOption}>
-            <Plus size={15} />
-            Add option
-          </button>
+      </div>
+      {usesOptions && (
+        <div>
+           <label style={{fontSize: 12, fontWeight: 800, color: 'var(--fg-muted)', textTransform: 'uppercase'}}>Options</label>
+           <div className="option-editor" style={{marginTop: 6}}>
+             {options.map((opt, i) => (
+                <div className="option-row" key={i}>
+                  <input value={opt} onChange={e => { const no = [...options]; no[i] = e.target.value; updateField({options: no}) }} placeholder={`Option ${i+1}`} />
+                  <button onClick={() => updateField({options: options.filter((_, idx) => idx !== i)})}><X size={14}/></button>
+                </div>
+             ))}
+             <button className="secondary" onClick={() => updateField({options: [...options, `Option ${options.length + 1}`]})} style={{width: 'fit-content'}}><Plus size={14}/> Add Option</button>
+           </div>
         </div>
-      ) : null}
-      <button className="secondary full" type="button" onClick={() => duplicateField(field.id)}>
-        <Copy size={15} />
-        Duplicate field
-      </button>
+      )}
     </div>
-  );
+  )
+}
+
+function AddFieldButton({ onSelect, isBottom }: { onSelect: (type: FieldType) => void, isBottom?: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`add-field-container ${isBottom ? 'bottom' : ''}`} onMouseLeave={() => setOpen(false)}>
+      <button className="add-field-btn" onClick={() => setOpen(!open)}>
+        <Plus size={16} /> {isBottom && "Add Question"}
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div initial={{opacity: 0, y: -10}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -10}} className="field-type-popover">
+            {fieldTypes.map(item => (
+               <button key={item.type} onClick={() => { onSelect(item.type); setOpen(false); }}>
+                 <item.icon size={20} />
+                 <span>{item.label}</span>
+               </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
 }
 
 function FieldPreview({ field, issues }: { field: Field; issues: string[] }) {
   return (
-    <div className="field-preview">
-      <div className="label-row">
-        <strong>{field.label || "Untitled field"}</strong>
+    <div className="field-preview" style={{width: '100%'}}>
+      <div className="label-row" style={{marginBottom: 8}}>
+        <strong style={{fontSize: 16, color: 'var(--fg)'}}>{field.label || "Untitled Question"}</strong>
         {field.required ? <span>Required</span> : null}
       </div>
-      {field.helper ? <p>{field.helper}</p> : null}
+      {field.helper ? <p style={{marginBottom: 12}}>{field.helper}</p> : null}
       {field.type === "shortText" ? <div className="fake-input" /> : null}
       {field.type === "richText" ? <div className="fake-textarea" /> : null}
       {field.type === "url" ? <div className="fake-input with-icon">https://</div> : null}
-      {field.type === "rating" ? <div className="stars">{"★★★★★"}</div> : null}
+      {field.type === "rating" ? <div className="stars" style={{fontSize: 24}}>{"★★★★★"}</div> : null}
       {field.type === "dropdown" ? <div className="fake-input">{field.options?.[0] ?? "Select"}</div> : null}
       {field.type === "checkboxes" ? (
         <div className="chips">{field.options?.map((option) => <span key={option}>{option}</span>)}</div>
@@ -930,18 +826,33 @@ function FieldPreview({ field, issues }: { field: Field; issues: string[] }) {
       {field.type === "image" || field.type === "video" ? (
         <div className="upload-drop">{field.type === "image" ? <Image size={18} /> : <FileVideo size={18} />} Walrus upload</div>
       ) : null}
-      {issues.length ? (
-        <div className="field-issues">
-          {issues.map((issue) => (
-            <span key={issue}>
-              <AlertCircle size={13} />
-              {issue}
-            </span>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
+}
+
+function PublicFormPreview({ schema }: { schema: FormSchema }) {
+  return (
+    <div style={{padding: '0', pointerEvents: 'none'}}>
+      <div className="public-header" style={{borderTopLeftRadius: 'var(--radius-md)', borderTopRightRadius: 'var(--radius-md)'}}>
+        <p className="eyebrow">Preview</p>
+        <h1>{schema.title || "Untitled Form"}</h1>
+        <p>{schema.description}</p>
+      </div>
+      <div className="public-form">
+        {schema.fields.map(field => (
+           <ResponseField
+             key={field.id}
+             field={field}
+             value={undefined}
+             onValue={() => {}}
+             onFile={() => {}}
+             onClearFile={() => {}}
+           />
+        ))}
+        <button className="submit-bar">Submit feedback</button>
+      </div>
+    </div>
+  )
 }
 
 function PublicForm({ formId, navigate }: { formId: string; navigate: (path: string) => void }) {
@@ -1243,15 +1154,7 @@ function ResponseField({
         <div className="check-grid">
           {field.options?.map((option) => {
             const checked = Array.isArray(value) && value.includes(option);
-  function handleDelete(formId: string) {
-    if (window.confirm("Are you sure you want to delete this form and all its responses?")) {
-      deleteForm(formId);
-      setForms(getForms());
-      toast.success("Form deleted");
-    }
-  }
-
-  return (
+            return (
               <label key={option} className={checked ? "checked" : ""}>
                 <input
                   type="checkbox"
