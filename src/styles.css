@@ -115,6 +115,17 @@ button:disabled {
   opacity: 0.65;
 }
 
+.spin {
+  animation: tuskd-spin 0.8s linear infinite;
+  transform-origin: center;
+}
+
+@keyframes tuskd-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 code {
   overflow-wrap: anywhere;
   color: var(--primary);
@@ -3108,6 +3119,46 @@ h2 {
   flex-wrap: wrap;
 }
 
+.dashboard-review-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  margin: -6px 0 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-float);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.dashboard-review-bar > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.dashboard-review-bar strong {
+  color: var(--fg);
+  font-size: 13px;
+}
+.dashboard-review-bar span {
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.dashboard-review-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.dashboard-review-actions .primary,
+.dashboard-review-actions .secondary {
+  min-height: 36px;
+  justify-content: center;
+  padding: 8px 12px;
+}
+
 .dashboard-filters {
   display: flex;
   align-items: center;
@@ -3404,6 +3455,9 @@ h2 {
 }
 .badge:hover {
   filter: brightness(0.95);
+}
+.badge.badge-pending {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 28%, transparent);
 }
 .badge.status-new {
   background: var(--warning-bg);
@@ -4976,6 +5030,17 @@ button.form-control-pill {
   .dashboard-toolbar {
     flex-direction: column;
     align-items: stretch;
+  }
+  .dashboard-review-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .dashboard-review-actions {
+    justify-content: stretch;
+  }
+  .dashboard-review-actions .primary,
+  .dashboard-review-actions .secondary {
+    flex: 1;
   }
   .dashboard-filters {
     overflow-x: auto;

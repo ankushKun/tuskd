@@ -335,6 +335,11 @@ type TestnetDialogState = {
   walletName: string;
   isPhantom: boolean;
 };
+type SubmissionReviewPatch = Partial<Pick<Submission, "status" | "priority">>;
+type PendingSubmissionUpdate = {
+  original: Submission;
+  next: Submission;
+};
 
 const TestnetWalletContext = createContext<{ ensureTestnetWallet: () => Promise<boolean> }>({
   ensureTestnetWallet: async () => true,
@@ -1360,7 +1365,7 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
              </button>
           )}
           <button className="primary" onClick={publish} disabled={busy || schemaIssues.length > 0}>
-             {busy ? "Publishing..." : (form?.status === "published" && !dirtySincePublish ? "Published" : "Publish")}
+             {busy ? <><Loader2 size={15} className="spin" /> Publishing</> : (form?.status === "published" && !dirtySincePublish ? "Published" : "Publish")}
           </button>
         </div>
       </header>
@@ -2492,6 +2497,8 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
   const [status, setStatus] = useState("all");
   const [priority, setPriority] = useState("all");
   const [viewType, setViewType] = useState<"grid" | "table">("table");
+  const [pendingReviewPatches, setPendingReviewPatches] = useState<Record<string, SubmissionReviewPatch>>({});
+  const [savingReviewChanges, setSavingReviewChanges] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [priorityOpen, setPriorityOpen] = useState(false);
   const statusRef = useRef<HTMLButtonElement>(null);
@@ -2514,6 +2521,21 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
+  const displaySubmissions = useMemo(
+    () => submissions.map((submission) => ({ ...submission, ...(pendingReviewPatches[submission.id] ?? {}) })),
+    [pendingReviewPatches, submissions],
+  );
+
+  const pendingReviewUpdates = useMemo<PendingSubmissionUpdate[]>(() => {
+    return submissions.flatMap((submission) => {
+      const patch = pendingReviewPatches[submission.id];
+      if (!patch) return [];
+      const next = { ...submission, ...patch };
+      if (next.status === submission.status && next.priority === submission.priority) return [];
+      return [{ original: submission, next }];
+    });
+  }, [pendingReviewPatches, submissions]);
+
   const filtered = useMemo(() => {
     return submissions.filter((submission) => {
       const haystack = JSON.stringify(submission.values).toLowerCase();
@@ -2522,18 +2544,18 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
         (priority === "all" || submission.priority === priority) &&
         haystack.includes(query.toLowerCase())
       );
-    });
-  }, [priority, query, status, submissions]);
+    }).map((submission) => ({ ...submission, ...(pendingReviewPatches[submission.id] ?? {}) }));
+  }, [pendingReviewPatches, priority, query, status, submissions]);
 
   const activeFilterCount = Number(Boolean(query.trim())) + Number(status !== "all") + Number(priority !== "all");
 
   const stats = useMemo(() => {
-    const total = submissions.length;
-    const newCount = submissions.filter((s) => s.status === "new").length;
-    const reviewed = submissions.filter((s) => s.status === "reviewed" || s.status === "prioritized").length;
-    const withMedia = submissions.filter((s) => Object.keys(s.media).length > 0).length;
+    const total = displaySubmissions.length;
+    const newCount = displaySubmissions.filter((s) => s.status === "new").length;
+    const reviewed = displaySubmissions.filter((s) => s.status === "reviewed" || s.status === "prioritized").length;
+    const withMedia = displaySubmissions.filter((s) => Object.keys(s.media).length > 0).length;
     return { total, newCount, reviewed, withMedia };
-  }, [submissions]);
+  }, [displaySubmissions]);
 
   if (!form) {
     return (
@@ -2557,36 +2579,72 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
     );
   }
 
-  async function patchSubmission(submission: Submission, patch: Partial<Submission>) {
+  function queueReviewPatch(submissionId: string, patch: SubmissionReviewPatch) {
+    const original = submissions.find((submission) => submission.id === submissionId);
+    if (!original) return;
+
+    setPendingReviewPatches((current) => {
+      const nextPatch = { ...(current[submissionId] ?? {}), ...patch };
+      const normalized: SubmissionReviewPatch = {};
+      if (nextPatch.status && nextPatch.status !== original.status) normalized.status = nextPatch.status;
+      if (nextPatch.priority && nextPatch.priority !== original.priority) normalized.priority = nextPatch.priority;
+
+      const next = { ...current };
+      if (normalized.status || normalized.priority) {
+        next[submissionId] = normalized;
+      } else {
+        delete next[submissionId];
+      }
+      return next;
+    });
+  }
+
+  function cancelReviewChanges() {
+    setPendingReviewPatches({});
+  }
+
+  async function saveReviewChanges() {
     if (!account?.address) {
       toast.error("Connect the form owner wallet to update response status.");
       return;
     }
-    if (!activeForm.suiObjectId || !submission.chainSubmissionId) {
-      toast.error("This response is missing Sui on-chain IDs and cannot be updated on testnet.");
+    if (!pendingReviewUpdates.length) return;
+    if (!activeForm.suiObjectId) {
+      toast.error("This form is missing its Sui object ID and cannot update responses on testnet.");
       return;
     }
-    const next = { ...submission, ...patch };
+    if (pendingReviewUpdates.some(({ original }) => !original.chainSubmissionId)) {
+      toast.error("Some changed responses are missing Sui on-chain IDs and cannot be updated on testnet.");
+      return;
+    }
+    setSavingReviewChanges(true);
     try {
       const canUseWallet = await ensureTestnetWallet();
       if (!canUseWallet) return;
       const tx = new Transaction();
-      tx.moveCall({
-        target: contractTarget("set_submission_status"),
-        arguments: [
-          tx.object(activeForm.suiObjectId),
-          tx.pure.u64(submission.chainSubmissionId),
-          tx.pure.u8(statusCode[next.status]),
-          tx.pure.u8(priorityCode[next.priority]),
-        ],
-      });
+      for (const { original, next } of pendingReviewUpdates) {
+        tx.moveCall({
+          target: contractTarget("set_submission_status"),
+          arguments: [
+            tx.object(activeForm.suiObjectId),
+            tx.pure.u64(original.chainSubmissionId!),
+            tx.pure.u8(statusCode[next.status]),
+            tx.pure.u8(priorityCode[next.priority]),
+          ],
+        });
+      }
       await signAndExecute.mutateAsync({ transaction: tx, chain: SUI_TESTNET_CHAIN });
-      updateSubmission(next);
+      for (const { next } of pendingReviewUpdates) {
+        updateSubmission(next);
+      }
       setSubmissions(getSubmissions(formId));
-      toast.success("Response status updated on Sui Testnet");
+      setPendingReviewPatches({});
+      toast.success(`${pendingReviewUpdates.length} response${pendingReviewUpdates.length === 1 ? "" : "s"} updated on Sui Testnet`);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "Unable to update response status on Sui Testnet.";
+      const msg = error instanceof Error ? error.message : "Unable to save response updates on Sui Testnet.";
       toast.error(msg);
+    } finally {
+      setSavingReviewChanges(false);
     }
   }
 
@@ -2745,6 +2803,24 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
         </div>
       </div>
 
+      {pendingReviewUpdates.length > 0 && (
+        <div className="dashboard-review-bar">
+          <div>
+            <strong>{pendingReviewUpdates.length} unsaved response update{pendingReviewUpdates.length === 1 ? "" : "s"}</strong>
+            <span>Save to write all status and priority changes in one Sui transaction.</span>
+          </div>
+          <div className="dashboard-review-actions">
+            <button className="secondary" onClick={cancelReviewChanges} disabled={savingReviewChanges}>
+              Cancel
+            </button>
+            <button className="primary" onClick={saveReviewChanges} disabled={savingReviewChanges}>
+              {savingReviewChanges ? <Loader2 size={15} className="spin" /> : <Check size={15} />}
+              Save changes
+            </button>
+          </div>
+        </div>
+      )}
+
       {!submissions.length ? (
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="empty-state">
           <div className="empty-state-icon"><MessageSquareText size={32} /></div>
@@ -2786,10 +2862,10 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
                     <div className="cell-time">{new Date(submission.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
                   </td>
                   <td>
-                    <StatusBadge value={submission.status} onChange={(v) => patchSubmission(submission, { status: v as Submission["status"] })} />
+                    <StatusBadge value={submission.status} pending={Boolean(pendingReviewPatches[submission.id]?.status)} disabled={savingReviewChanges} onChange={(v) => queueReviewPatch(submission.id, { status: v as Submission["status"] })} />
                   </td>
                   <td>
-                    <PriorityBadge value={submission.priority} onChange={(v) => patchSubmission(submission, { priority: v as Submission["priority"] })} />
+                    <PriorityBadge value={submission.priority} pending={Boolean(pendingReviewPatches[submission.id]?.priority)} disabled={savingReviewChanges} onChange={(v) => queueReviewPatch(submission.id, { priority: v as Submission["priority"] })} />
                   </td>
                   {adminSchema.fields.slice(0, 4).map((field) => (
                     <td key={field.id}>
@@ -2821,8 +2897,8 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
                   {new Date(submission.createdAt).toLocaleString()}
                 </div>
                 <div className="submission-card-badges">
-                  <StatusBadge value={submission.status} onChange={(v) => patchSubmission(submission, { status: v as Submission["status"] })} />
-                  <PriorityBadge value={submission.priority} onChange={(v) => patchSubmission(submission, { priority: v as Submission["priority"] })} />
+                  <StatusBadge value={submission.status} pending={Boolean(pendingReviewPatches[submission.id]?.status)} disabled={savingReviewChanges} onChange={(v) => queueReviewPatch(submission.id, { status: v as Submission["status"] })} />
+                  <PriorityBadge value={submission.priority} pending={Boolean(pendingReviewPatches[submission.id]?.priority)} disabled={savingReviewChanges} onChange={(v) => queueReviewPatch(submission.id, { priority: v as Submission["priority"] })} />
                 </div>
               </div>
               <div className="submission-card-body">
@@ -2851,7 +2927,7 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
   );
 }
 
-function StatusBadge({ value, onChange }: { value: Submission["status"]; onChange: (v: string) => void }) {
+function StatusBadge({ value, pending = false, disabled = false, onChange }: { value: Submission["status"]; pending?: boolean; disabled?: boolean; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -2866,6 +2942,9 @@ function StatusBadge({ value, onChange }: { value: Submission["status"]; onChang
     if (open) document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
   const config: Record<string, { label: string; class: string }> = {
     new: { label: "New", class: "status-new" },
     reviewed: { label: "Reviewed", class: "status-reviewed" },
@@ -2875,7 +2954,7 @@ function StatusBadge({ value, onChange }: { value: Submission["status"]; onChang
   const current = config[value] ?? config.new;
   return (
     <div className="badge-dropdown">
-      <button ref={triggerRef} className={`badge ${current.class}`} onClick={() => setOpen(!open)}>
+      <button ref={triggerRef} className={`badge ${current.class} ${pending ? "badge-pending" : ""}`} disabled={disabled} onClick={() => setOpen(!open)}>
         {current.label} <ChevronDown size={12} />
       </button>
       <AnimatePresence>
@@ -2903,7 +2982,7 @@ function StatusBadge({ value, onChange }: { value: Submission["status"]; onChang
   );
 }
 
-function PriorityBadge({ value, onChange }: { value: Submission["priority"]; onChange: (v: string) => void }) {
+function PriorityBadge({ value, pending = false, disabled = false, onChange }: { value: Submission["priority"]; pending?: boolean; disabled?: boolean; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -2918,6 +2997,9 @@ function PriorityBadge({ value, onChange }: { value: Submission["priority"]; onC
     if (open) document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
   const config: Record<string, { label: string; class: string }> = {
     low: { label: "Low", class: "priority-low" },
     medium: { label: "Medium", class: "priority-medium" },
@@ -2926,7 +3008,7 @@ function PriorityBadge({ value, onChange }: { value: Submission["priority"]; onC
   const current = config[value] ?? config.medium;
   return (
     <div className="badge-dropdown">
-      <button ref={triggerRef} className={`badge ${current.class}`} onClick={() => setOpen(!open)}>
+      <button ref={triggerRef} className={`badge ${current.class} ${pending ? "badge-pending" : ""}`} disabled={disabled} onClick={() => setOpen(!open)}>
         {current.label} <ChevronDown size={12} />
       </button>
       <AnimatePresence>
