@@ -3108,6 +3108,8 @@ h2 {
   letter-spacing: 0.5px;
   transition: all 0.15s;
   flex-shrink: 0;
+  overflow: hidden;
+  white-space: nowrap;
 }
 .walrus-pill:hover {
   color: var(--fg);
@@ -3115,40 +3117,46 @@ h2 {
 }
 .walrus-pill svg {
   color: var(--primary);
+  flex-shrink: 0;
 }
-.walrus-expand {
-  display: flex;
-  flex-direction: row;
+.walrus-pill-label {
+  flex-shrink: 0;
+}
+.walrus-pill-expand {
+  display: inline-flex;
   align-items: center;
-  gap: 14px;
-  background: var(--bg-accent);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 8px 14px;
-  white-space: nowrap;
+  gap: 10px;
   overflow: hidden;
+  white-space: nowrap;
 }
-.walrus-expand-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
+.walrus-expand-divider {
+  display: inline-block;
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+.walrus-pill-expand .walrus-expand-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
   color: var(--fg-muted);
+  flex-shrink: 0;
 }
-.walrus-expand-row a {
+.walrus-pill-expand a {
   color: var(--primary);
   text-decoration: none;
   font-weight: 700;
-  font-size: 12px;
+  font-size: 11px;
+  flex-shrink: 0;
 }
-.walrus-expand-row a:hover {
+.walrus-pill-expand a:hover {
   text-decoration: underline;
 }
-.walrus-expand-row button {
+.walrus-expand-create {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
+  gap: 4px;
+  padding: 4px 10px;
   border-radius: var(--radius-sm);
   border: none;
   background: var(--primary);
@@ -3157,13 +3165,10 @@ h2 {
   font-weight: 700;
   cursor: pointer;
   transition: all 0.15s;
+  flex-shrink: 0;
 }
-.walrus-expand-row button:hover {
+.walrus-expand-create:hover {
   background: var(--primary-hover);
-}
-.walrus-expand-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
 }
 
 /* Success Page */

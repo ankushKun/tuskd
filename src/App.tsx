@@ -1529,35 +1529,38 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
 
       {/* Footer */}
       <footer className="public-form-footer">
-        <AnimatePresence>
-          {showProofs && (
-            <motion.div
-              initial={{ opacity: 0, y: 8, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8, scale: 0.96 }}
-              transition={{ duration: 0.18 }}
-              className="walrus-expand"
-            >
-              <div className="walrus-expand-row">
-                <span className="walrus-expand-code">{activeForm.schemaBlob.id.slice(0, 20)}...</span>
-              </div>
-              {activeForm.txDigest && (
-                <div className="walrus-expand-row">
-                  <a href={testnetTxUrl(activeForm.txDigest)} target="_blank" rel="noreferrer">View transaction ↗</a>
-                </div>
-              )}
-              <div className="walrus-expand-row">
-                <button onClick={() => navigate("/builder")}>
-                  <Plus size={12} /> Create a form
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-        <button className="walrus-pill" onClick={() => setShowProofs(!showProofs)}>
+        <motion.button
+          layout
+          className="walrus-pill"
+          onClick={() => setShowProofs(!showProofs)}
+          transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
+        >
           <Lock size={10} strokeWidth={2.5} />
-          Powered by {activeForm.schemaBlob?.storage === "walrus" ? "Walrus" : "Local"}
-        </button>
+          <span className="walrus-pill-label">Powered by {activeForm.schemaBlob?.storage === "walrus" ? "Walrus" : "Local"}</span>
+          <AnimatePresence>
+            {showProofs && (
+              <motion.span
+                className="walrus-pill-expand"
+                initial={{ opacity: 0, width: 0 }}
+                animate={{ opacity: 1, width: "auto" }}
+                exit={{ opacity: 0, width: 0 }}
+                transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+              >
+                <span className="walrus-expand-divider" />
+                <span className="walrus-expand-code">{activeForm.schemaBlob.id.slice(0, 16)}...</span>
+                {activeForm.txDigest && (
+                  <a href={testnetTxUrl(activeForm.txDigest)} target="_blank" rel="noreferrer">View tx ↗</a>
+                )}
+                <button
+                  className="walrus-expand-create"
+                  onClick={(e) => { e.stopPropagation(); navigate("/builder"); }}
+                >
+                  <Plus size={11} /> Create
+                </button>
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </motion.button>
       </footer>
     </div>
   );
