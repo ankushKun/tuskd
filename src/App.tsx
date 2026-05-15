@@ -1526,28 +1526,37 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
         )}
       </main>
 
-      {/* Minimal footer */}
-      <footer className="public-form-footer-minimal">
-        <button className="proof-badge-minimal" onClick={() => setShowProofs(!showProofs)}>
-          <Lock size={10} />
-          {activeForm.schemaBlob?.storage === "walrus" ? "Walrus" : "Local"}
-        </button>
+      {/* Footer */}
+      <footer className="public-form-footer">
         <AnimatePresence>
           {showProofs && (
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              className="proof-details-minimal"
+              initial={{ opacity: 0, y: 8, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.96 }}
+              transition={{ duration: 0.18 }}
+              className="walrus-expand"
             >
-              <span>{activeForm.schemaBlob.id.slice(0, 16)}...</span>
+              <div className="walrus-expand-row">
+                <span className="walrus-expand-code">{activeForm.schemaBlob.id.slice(0, 20)}...</span>
+              </div>
               {activeForm.txDigest && (
-                <a href={testnetTxUrl(activeForm.txDigest)} target="_blank" rel="noreferrer">View tx ↗</a>
+                <div className="walrus-expand-row">
+                  <a href={testnetTxUrl(activeForm.txDigest)} target="_blank" rel="noreferrer">View transaction ↗</a>
+                </div>
               )}
+              <div className="walrus-expand-row">
+                <button onClick={() => navigate("/builder")}>
+                  <Plus size={12} /> Create a form
+                </button>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
+        <button className="walrus-pill" onClick={() => setShowProofs(!showProofs)}>
+          <Lock size={10} strokeWidth={2.5} />
+          Powered by {activeForm.schemaBlob?.storage === "walrus" ? "Walrus" : "Local"}
+        </button>
       </footer>
     </div>
   );

@@ -2628,7 +2628,7 @@ h2 {
   gap: 6px;
   padding: 6px 12px;
   border-radius: var(--radius-full);
-  background: var(--bg-panel);
+  background: var(--bg-accent);
   border: 1px solid var(--border);
   color: var(--fg-muted);
   font-size: 12px;
@@ -3082,21 +3082,22 @@ h2 {
 }
 
 /* Minimal Footer */
-.public-form-footer-minimal {
+.public-form-footer {
   padding: 20px 24px;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: flex-end;
-  gap: 12px;
+  flex-direction: column;
+  gap: 8px;
 }
-.proof-badge-minimal {
+.walrus-pill {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 10px;
+  gap: 6px;
+  padding: 6px 14px;
   border-radius: var(--radius-full);
-  border: none;
-  background: transparent;
+  background: var(--bg-accent);
+  border: 1px solid var(--border);
   color: var(--fg-muted);
   font-size: 11px;
   font-weight: 700;
@@ -3105,23 +3106,61 @@ h2 {
   letter-spacing: 0.5px;
   transition: all 0.15s;
 }
-.proof-badge-minimal:hover {
+.walrus-pill:hover {
   color: var(--fg);
+  border-color: var(--primary);
 }
-.proof-details-minimal {
+.walrus-pill svg {
+  color: var(--primary);
+}
+.walrus-expand {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  background: var(--bg-accent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  min-width: 220px;
+}
+.walrus-expand-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  font-size: 11px;
+  gap: 8px;
+  font-size: 12px;
   color: var(--fg-muted);
 }
-.proof-details-minimal a {
+.walrus-expand-row a {
   color: var(--primary);
   text-decoration: none;
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 12px;
 }
-.proof-details-minimal a:hover {
+.walrus-expand-row a:hover {
   text-decoration: underline;
+}
+.walrus-expand-row button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: var(--primary);
+  color: var(--primary-fg);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.walrus-expand-row button:hover {
+  background: var(--primary-hover);
+}
+.walrus-expand-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  word-break: break-all;
 }
 
 /* Success Page */
@@ -3337,14 +3376,11 @@ h2 {
   gap: 8px;
   padding: 6px 12px;
   border-radius: var(--radius-full);
-  background: var(--bg-float);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: var(--bg-accent);
   border: 1px solid var(--border);
   font-size: 12px;
   font-weight: 600;
   color: var(--fg-muted);
-  box-shadow: var(--shadow-float);
 }
 .form-control-dot {
   width: 8px;
@@ -3364,13 +3400,10 @@ h2 {
   height: 32px;
   border-radius: var(--radius-full);
   border: 1px solid var(--border);
-  background: var(--bg-float);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: var(--bg-accent);
   color: var(--fg-muted);
   cursor: pointer;
   transition: all 0.15s;
-  box-shadow: var(--shadow-float);
 }
 .form-control-theme:hover {
   background: var(--bg-muted);
