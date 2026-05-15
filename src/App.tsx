@@ -20,11 +20,9 @@ import {
   Trash2,
   Wallet,
   AlertCircle,
-  ArrowDown,
   ArrowUp,
   Triangle,
   Copy,
-  FileCheck2,
   X,
   Search,
   Moon,
@@ -86,6 +84,7 @@ import {
   publishStoredForm,
   readJsonBlob,
   saveDraftForm,
+  saveForm,
   saveSubmission,
   updateSubmission,
   uploadFile,
@@ -248,6 +247,52 @@ async function fetchPublishedFormFromSui(formObjectId: string, suiClient: Return
   };
 }
 
+function findCreatedFormObjectIds(tx: unknown) {
+  const changes = (tx as { objectChanges?: Array<{ type?: string; objectType?: string; objectId?: string }> }).objectChanges ?? [];
+  const formType = `${TESTNET_CONFIG.tuskdPackageId}::forms::Form`.toLowerCase();
+  return changes
+    .filter((change) => change.type === "created" && change.objectType?.toLowerCase() === formType && change.objectId)
+    .map((change) => change.objectId as string);
+}
+
+async function fetchCreatedFormsForOwner(owner: string, suiClient: ReturnType<typeof useSuiClient>) {
+  if (!TESTNET_CONFIG.tuskdPackageId) return [];
+  const forms: StoredForm[] = [];
+  let cursor: string | null | undefined;
+  const seen = new Set<string>();
+
+  for (let page = 0; page < 4; page += 1) {
+    const response = await suiClient.queryTransactionBlocks({
+      filter: { FromAddress: owner },
+      options: { showObjectChanges: true },
+      cursor,
+      limit: 50,
+      order: "descending",
+    });
+
+    for (const tx of response.data) {
+      const digest = tx.digest;
+      for (const objectId of findCreatedFormObjectIds(tx)) {
+        if (seen.has(objectId)) continue;
+        seen.add(objectId);
+        try {
+          const form = await fetchPublishedFormFromSui(objectId, suiClient);
+          if (form.owner.toLowerCase() === owner.toLowerCase()) {
+            forms.push({ ...form, txDigest: digest });
+          }
+        } catch {
+          // Ignore stale/deleted objects or blobs that cannot be read.
+        }
+      }
+    }
+
+    if (!response.hasNextPage || !response.nextCursor) break;
+    cursor = response.nextCursor;
+  }
+
+  return forms;
+}
+
 const statusCode: Record<Submission["status"], number> = {
   new: 0,
   reviewed: 1,
@@ -374,7 +419,7 @@ function App() {
   return (
     <AppProvider>
       <main>
-        {isPublicForm ? <FormControls /> : <TopBar navigate={navigate} />}
+        {isPublicForm ? <FormControls /> : <TopBar navigate={navigate} path={path} />}
         {formMatch ? (
           <PublicForm formId={formMatch[1]} navigate={navigate} />
         ) : adminMatch ? (
@@ -453,29 +498,21 @@ function WalletPill() {
   );
 }
 
-function TopBar({ navigate }: { navigate: (path: string) => void }) {
+function TopBar({ navigate, path }: { navigate: (path: string) => void; path: string }) {
   const { theme, toggleTheme } = useContext(ThemeContext);
 
   return (
     <header className="topbar">
-      <button className="brand" onClick={() => navigate("/")} aria-label="TuskD home">
-        <span className="brand-mark">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 2L2 7l10 5 10-5-10-5z" />
-            <path d="M2 17l10 5 10-5" />
-            <path d="M2 12l10 5 10-5" />
-          </svg>
-        </span>
-        <span className="brand-text">
-          <strong>TuskD</strong>
-          <small>Walrus-native forms</small>
-        </span>
+      <button className="topbar-link topbar-home-link" onClick={() => navigate("/")}>
+        TuskD
       </button>
       <div className="topbar-actions">
-        <button className="topbar-link" onClick={() => navigate("/forms")}>
-          <Table2 size={14} />
-          Workspace
-        </button>
+        {path !== "/forms" && (
+          <button className="topbar-link" onClick={() => navigate("/forms")}>
+            <Table2 size={14} />
+            Workspace
+          </button>
+        )}
         <WalletPill />
         <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme">
           {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
@@ -487,6 +524,14 @@ function TopBar({ navigate }: { navigate: (path: string) => void }) {
 
 function LandingPage({ navigate }: { navigate: (path: string) => void }) {
   const account = useCurrentAccount();
+  const [previewMode, setPreviewMode] = useState<"builder" | "form">("builder");
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setPreviewMode((mode) => (mode === "builder" ? "form" : "builder"));
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   return (
     <div className="landing-page">
@@ -499,231 +544,134 @@ function LandingPage({ navigate }: { navigate: (path: string) => void }) {
         >
           <p className="landing-kicker">
             <Wallet size={14} />
-            Sui Testnet + Walrus Testnet
+            Sui + Walrus
           </p>
           <h1>TuskD</h1>
           <p className="landing-lede">
-            Verifiable intake for teams collecting applications, bug reports, grants, and review evidence that should not disappear into a spreadsheet.
+            Build forms, collect media-rich responses, and keep publish and submit actions verifiable on testnet.
           </p>
           <div className="landing-actions">
             <button className="primary landing-primary" onClick={() => navigate("/forms")}>
-              {account ? "Open workspace" : "Launch workspace"}
+              {account ? "Open workspace" : "Start building"}
               <ArrowRight size={16} />
             </button>
-            <button className="secondary landing-secondary" onClick={() => document.getElementById("landing-workflow")?.scrollIntoView({ behavior: "smooth" })}>
-              <ArrowDown size={16} />
-              See workflow
-            </button>
-          </div>
-          <div className="landing-proof-row" aria-label="Platform guarantees">
-            <span><Lock size={13} /> Signed actions</span>
-            <span><Upload size={13} /> Stored evidence</span>
-            <span><FileCheck2 size={13} /> Review trail</span>
           </div>
         </motion.div>
-
         <motion.div
-          className="landing-product-shot"
+          className="landing-hero-preview"
           initial={{ opacity: 0, y: 22 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.08 }}
-          aria-label="TuskD product preview"
+          aria-label="TuskD form preview"
         >
-          <div className="landing-window">
-            <div className="landing-window-top">
-              <span />
-              <span />
-              <span />
-              <strong>Feedback intake</strong>
+          <div className="landing-preview-shell">
+            <div className="landing-preview-top">
+              <span className={previewMode === "builder" ? "active" : ""}>Builder</span>
+              <span className={previewMode === "form" ? "active" : ""}>Form</span>
             </div>
-            <div className="landing-workbench">
-              <div className="landing-field-rail" aria-label="Builder field palette">
-                <button><MessageSquareText size={14} /> Evidence</button>
-                <button><Settings2 size={14} /> Category</button>
-                <button><Star size={14} /> Score</button>
-                <button><Image size={14} /> Media</button>
-              </div>
-              <div className="landing-form-preview">
-                <div className="landing-preview-tabs">
-                  <span className="active">Build</span>
-                  <span>Submit</span>
-                  <span>Review</span>
-                </div>
-                <div className="landing-form-title">
-                  <span>01</span>
-                  <strong>What should the review team investigate first?</strong>
-                </div>
-                <div className="landing-input-line" />
-                <div className="landing-form-title compact">
-                  <span>02</span>
-                  <strong>Attach supporting evidence</strong>
-                </div>
-                <div className="landing-upload-preview">
-                  <Upload size={18} />
-                  <span>Screenshot, video, or report file</span>
-                </div>
-                <div className="landing-review-list" aria-label="Response review preview">
-                  <div>
-                    <span className="landing-review-dot high" />
-                    <strong>Wallet mismatch report</strong>
-                    <small>High priority</small>
+            <AnimatePresence mode="wait">
+              {previewMode === "builder" ? (
+                <motion.div
+                  key="builder"
+                  className="landing-preview-pane"
+                  initial={{ opacity: 0, x: 18 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -18 }}
+                  transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
+                >
+                  <div className="landing-builder-preview">
+                    <div className="landing-preview-sidebar">
+                      <span><MessageSquareText size={13} /> Short text</span>
+                      <span><Settings2 size={13} /> Dropdown</span>
+                      <span><Image size={13} /> Upload</span>
+                    </div>
+                    <div className="landing-preview-canvas">
+                      <div className="landing-preview-question">
+                        <small>01</small>
+                        <strong>What should we review?</strong>
+                        <i />
+                      </div>
+                      <div className="landing-preview-question compact">
+                        <small>02</small>
+                        <strong>Pick a category</strong>
+                        <em>Bug report</em>
+                      </div>
+                      <div className="landing-preview-publish">
+                        <Lock size={13} />
+                        Publish to Walrus
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <span className="landing-review-dot" />
-                    <strong>Grant milestone evidence</strong>
-                    <small>Reviewed</small>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="form"
+                  className="landing-preview-pane"
+                  initial={{ opacity: 0, x: 18 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -18 }}
+                  transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
+                >
+                  <div className="landing-form-mode-preview">
+                    <div className="landing-form-mode-meta">
+                      <span>3 questions</span>
+                      <span>Powered by TuskD</span>
+                    </div>
+                    <div className="landing-form-mode-question">
+                      <small>01</small>
+                      <h3>Tell us what happened.</h3>
+                      <div />
+                    </div>
+                    <button className="landing-form-mode-button">OK</button>
                   </div>
-                </div>
-              </div>
-              <div className="landing-proof-panel">
-                <div>
-                  <span>Schema blob</span>
-                  <code>0xwal...9c4</code>
-                </div>
-                <div>
-                  <span>Sui tx</span>
-                  <code>BFSq...4pJH</code>
-                </div>
-                <div>
-                  <span>Status update</span>
-                  <code>priority: high</code>
-                </div>
-                <div className="landing-status-pill">
-                  <Check size={13} />
-                  Verified
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="landing-admin-preview">
-            <div>
-              <span className="landing-admin-dot" />
-              <strong>Response queue</strong>
-              <small>12 new</small>
-            </div>
-            <div className="landing-admin-statuses">
-              <span>New</span>
-              <span>Reviewed</span>
-              <span>High priority</span>
-            </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </motion.div>
       </section>
 
-      <section className="landing-section landing-audience-section">
-        <div className="landing-section-heading">
-          <p className="eyebrow">Designed for</p>
-          <h2>Intake flows where the response record matters.</h2>
-          <p>
-            Use TuskD when your team needs structured answers, media uploads, a reviewer queue, and proof that critical actions were signed and stored.
-          </p>
-        </div>
-        <div className="landing-use-case-grid">
-          <article>
-            <span><FileText size={16} /></span>
-            <strong>Grant and milestone reviews</strong>
-            <p>Collect proposals, proofs of work, attachments, and reviewer decisions in one queue.</p>
-          </article>
-          <article>
-            <span><AlertCircle size={16} /></span>
-            <strong>Bug and abuse reports</strong>
-            <p>Capture screenshots, videos, URLs, severity signals, and wallet-linked submitter context.</p>
-          </article>
-          <article>
-            <span><Inbox size={16} /></span>
-            <strong>Partner intake</strong>
-            <p>Route applications from public links into a searchable, prioritized response dashboard.</p>
-          </article>
-        </div>
-      </section>
-
-      <section className="landing-section landing-section-tight">
-        <div className="landing-section-heading">
-          <p className="eyebrow">Platform analysis</p>
-          <h2>Form software with a proof layer.</h2>
-          <p>
-            The platform keeps the familiar form workflow but adds signed transactions and storage receipts at publish, submit, and review checkpoints.
-          </p>
-        </div>
+      <section className="landing-section landing-section-tight" aria-label="TuskD features">
         <div className="landing-feature-grid">
           <article>
-            <LayoutTemplate size={20} />
-            <h3>Build rich forms</h3>
-            <p>Compose short text, rich text, dropdown, checkbox, rating, URL, image, and video fields with standard or slide-style layouts.</p>
+            <MessageSquareText size={20} />
+            <h3>Create</h3>
+            <p>Design focused forms with text, choices, ratings, URLs, images, and video uploads.</p>
           </article>
           <article>
             <Lock size={20} />
-            <h3>Publish with proofs</h3>
-            <p>Form schemas, submissions, and uploaded media go to Walrus, while publish and submit actions are backed by signed Sui transactions.</p>
+            <h3>Publish</h3>
+            <p>Store schemas and responses on Walrus with wallet-signed Sui transactions.</p>
           </article>
           <article>
             <BarChart3 size={20} />
-            <h3>Review the queue</h3>
-            <p>Admins can search, filter, prioritize, update status, inspect media, open transaction links, and export CSVs.</p>
+            <h3>Review</h3>
+            <p>Search submissions, prioritize work, update status, and export the response set.</p>
           </article>
         </div>
       </section>
 
-      <section className="landing-section landing-proof-section">
-        <div className="landing-proof-copy">
-          <p className="eyebrow">Integrity model</p>
-          <h2>Every major handoff leaves a receipt.</h2>
-          <p>
-            TuskD makes the important parts of intake auditable without turning the respondent experience into a block explorer.
-          </p>
+      <section className="landing-section landing-github-section">
+        <div>
+          <p className="eyebrow">Open source</p>
+          <h2>Forms on Sui and Walrus.</h2>
         </div>
-        <div className="landing-integrity-grid">
-          <article>
-            <span>01</span>
-            <strong>Publish</strong>
-            <p>Schema uploaded to Walrus; form object created through a wallet-signed Sui transaction.</p>
-          </article>
-          <article>
-            <span>02</span>
-            <strong>Submit</strong>
-            <p>Answers and media are stored, then attached to a signed submission event.</p>
-          </article>
-          <article>
-            <span>03</span>
-            <strong>Review</strong>
-            <p>Status and priority updates are written through the owner workflow, preserving reviewer intent.</p>
-          </article>
-        </div>
-      </section>
-
-      <section id="landing-workflow" className="landing-section landing-workflow-section">
-        <div className="landing-section-heading">
-          <p className="eyebrow">Workflow</p>
-          <h2>From draft to reviewed submission</h2>
-        </div>
-        <div className="landing-steps">
-          <article>
-            <span>1</span>
-            <h3>Create</h3>
-            <p>Connect a Sui wallet, create a draft, and arrange the fields your team needs.</p>
-          </article>
-          <article>
-            <span>2</span>
-            <h3>Publish</h3>
-            <p>Upload the schema to Walrus and sign the Sui create-form transaction.</p>
-          </article>
-          <article>
-            <span>3</span>
-            <h3>Collect</h3>
-            <p>Share a public link where respondents submit answers and media from their wallet.</p>
-          </article>
-          <article>
-            <span>4</span>
-            <h3>Decide</h3>
-            <p>Filter submissions, set status and priority on Sui, and export the working set.</p>
-          </article>
-        </div>
+        <a
+          className="landing-github-link"
+          href="https://github.com/ankushKun/tuskd"
+          target="_blank"
+          rel="noreferrer"
+        >
+          <Github size={18} />
+          github.com/ankushKun/tuskd
+          <ExternalLink size={16} />
+        </a>
       </section>
 
       <section className="landing-section landing-cta">
         <div>
           <p className="eyebrow">Start</p>
-          <h2>Build a testnet intake flow with receipts from the first publish.</h2>
+          <h2>Launch a verifiable form.</h2>
         </div>
         <button className="primary landing-primary" onClick={() => navigate("/forms")}>
           Open workspace
@@ -813,11 +761,53 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "draft" | "published">("all");
   const [copiedId, setCopiedId] = useState("");
+  const [syncingForms, setSyncingForms] = useState(false);
   const account = useCurrentAccount();
+  const suiClient = useSuiClient();
 
   useEffect(() => {
     setForms(getForms());
   }, []);
+
+  useEffect(() => {
+    if (!account?.address) return;
+    const owner = account.address;
+    let cancelled = false;
+
+    async function syncCreatedForms() {
+      setSyncingForms(true);
+      try {
+        const remoteForms = await fetchCreatedFormsForOwner(owner, suiClient);
+        if (cancelled || !remoteForms.length) return;
+
+        const localForms = getForms();
+        const knownIds = new Set(localForms.map((form) => form.id));
+        const knownObjectIds = new Set(localForms.map((form) => form.suiObjectId).filter(Boolean));
+        let changed = false;
+
+        for (const remoteForm of remoteForms) {
+          if (knownIds.has(remoteForm.id) || knownObjectIds.has(remoteForm.suiObjectId)) continue;
+          saveForm(remoteForm);
+          knownIds.add(remoteForm.id);
+          if (remoteForm.suiObjectId) knownObjectIds.add(remoteForm.suiObjectId);
+          changed = true;
+        }
+
+        if (changed && !cancelled) {
+          setForms(getForms());
+        }
+      } catch {
+        if (!cancelled) toast.error("Unable to sync forms from Sui right now.");
+      } finally {
+        if (!cancelled) setSyncingForms(false);
+      }
+    }
+
+    syncCreatedForms();
+    return () => {
+      cancelled = true;
+    };
+  }, [account?.address, suiClient]);
 
   const filteredForms = useMemo(() => {
     return forms.filter((form) => {
@@ -865,7 +855,7 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
       <div className="forms-home-header">
         <div>
           <h1>Your forms</h1>
-          <p className="muted">Create, publish, and manage feedback forms on Walrus.</p>
+          <p className="muted">{syncingForms ? "Syncing forms from Sui..." : "Create, publish, and manage feedback forms on Walrus."}</p>
         </div>
         <button className="primary" onClick={newForm}>
           <Plus size={16} />
