@@ -2,7 +2,6 @@ import type { AppStore, BlobReceipt, FormSchema, PublishedForm, StoredForm, Subm
 import { TESTNET_CONFIG } from "./config";
 
 const STORE_KEY = "tusktable:v1";
-const LOCAL_BLOB_PREFIX = "tusk-local";
 
 const publisher = TESTNET_CONFIG.walrusPublisher;
 const aggregator = TESTNET_CONFIG.walrusAggregator;
@@ -10,19 +9,6 @@ const epochs = TESTNET_CONFIG.walrusEpochs;
 
 export function id(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 14)}`;
-}
-
-export function digest() {
-  const chars = "0123456789abcdef";
-  return `0x${Array.from({ length: 64 }, () => chars[Math.floor(Math.random() * chars.length)]).join("")}`;
-}
-
-export function demoAddress() {
-  const saved = localStorage.getItem("tusktable:address");
-  if (saved) return saved;
-  const addr = `0x${crypto.randomUUID().replaceAll("-", "")}${crypto.randomUUID().replaceAll("-", "").slice(0, 32)}`.slice(0, 66);
-  localStorage.setItem("tusktable:address", addr);
-  return addr;
 }
 
 export function readStore(): AppStore {
@@ -48,14 +34,15 @@ export function getForms() {
   return readStore().forms.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-export function createDraftForm(schema = createDefaultSchema()) {
+export function createDraftForm(schema: FormSchema | undefined, owner: string) {
   const now = new Date().toISOString();
+  const draftSchema = schema ?? createDefaultSchema();
   const form: StoredForm = {
     id: id("form"),
-    owner: demoAddress(),
+    owner,
     network: "sui-testnet",
     status: "draft",
-    draftSchema: schema,
+    draftSchema,
     createdAt: now,
     updatedAt: now,
   };
@@ -63,7 +50,7 @@ export function createDraftForm(schema = createDefaultSchema()) {
   return form;
 }
 
-export function saveDraftForm(formId: string, schema: FormSchema) {
+export function saveDraftForm(formId: string, schema: FormSchema, owner: string) {
   const store = readStore();
   const existing = store.forms.find((form) => form.id === formId);
   const now = new Date().toISOString();
@@ -71,7 +58,7 @@ export function saveDraftForm(formId: string, schema: FormSchema) {
     ? { ...existing, draftSchema: schema, updatedAt: now }
     : {
         id: formId,
-        owner: demoAddress(),
+        owner,
         network: "sui-testnet",
         status: "draft",
         draftSchema: schema,
@@ -91,19 +78,20 @@ export function deleteForm(formId: string) {
   });
 }
 
-export function publishStoredForm(formId: string, schema: FormSchema, schemaBlob: BlobReceipt, txDigest: string) {
+export function publishStoredForm(formId: string, schema: FormSchema, schemaBlob: BlobReceipt, owner: string, txDigest: string, suiObjectId: string) {
   const store = readStore();
   const existing = store.forms.find((form) => form.id === formId);
   const now = new Date().toISOString();
   const form: StoredForm = {
     id: formId,
-    owner: existing?.owner ?? demoAddress(),
+    owner: existing?.owner ?? owner,
     network: "sui-testnet",
     status: "published",
     draftSchema: schema,
     schema,
     schemaBlob,
     txDigest,
+    suiObjectId,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
     publishedAt: now,
@@ -154,7 +142,7 @@ function migrateForm(form: unknown): StoredForm | null {
       updatedAt: raw.updatedAt ?? raw.publishedAt ?? raw.createdAt,
     } as StoredForm;
   }
-  if (raw.schema && raw.schemaBlob && raw.txDigest) {
+  if (raw.schema && raw.schemaBlob) {
     return {
       id: raw.id,
       owner: raw.owner,
@@ -164,6 +152,7 @@ function migrateForm(form: unknown): StoredForm | null {
       schema: raw.schema,
       schemaBlob: raw.schemaBlob,
       txDigest: raw.txDigest,
+      suiObjectId: raw.suiObjectId,
       createdAt: raw.createdAt,
       updatedAt: raw.createdAt,
       publishedAt: raw.createdAt,
@@ -206,42 +195,13 @@ async function uploadBlob(blob: Blob, name: string, type: "json" | "file"): Prom
       contentType: blob.type,
       size: blob.size,
     };
-  } catch {
-    return uploadLocal(blob, name, type);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Walrus upload failed";
+    throw new Error(message);
   }
-}
-
-async function uploadLocal(blob: Blob, name: string, type: "json" | "file"): Promise<BlobReceipt> {
-  const blobId = `${LOCAL_BLOB_PREFIX}_${crypto.randomUUID().replaceAll("-", "")}`;
-  const data = await blobToDataUrl(blob);
-  localStorage.setItem(`tusktable:blob:${blobId}`, data);
-  return {
-    id: blobId,
-    storage: "local",
-    network: "local-fallback",
-    url: data,
-    type,
-    name,
-    contentType: blob.type,
-    size: blob.size,
-  };
-}
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
 }
 
 export async function readJsonBlob<T>(receipt: BlobReceipt): Promise<T> {
-  if (receipt.storage === "local") {
-    const dataUrl = localStorage.getItem(`tusktable:blob:${receipt.id}`) || receipt.url;
-    const response = await fetch(dataUrl);
-    return response.json() as Promise<T>;
-  }
   const response = await fetch(receipt.url);
   if (!response.ok) throw new Error(`Unable to read Walrus blob ${receipt.id}`);
   return response.json() as Promise<T>;
@@ -252,7 +212,6 @@ export function createDefaultSchema(): FormSchema {
     id: id("schema"),
     title: "Untitled Form",
     description: "Edit these starter questions, drag fields to reorder them, then publish a share link.",
-    encrypted: false,
     layout: "standard",
     createdAt: new Date().toISOString(),
     fields: [

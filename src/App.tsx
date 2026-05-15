@@ -67,6 +67,8 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { motion, AnimatePresence } from "framer-motion";
+import { useCurrentAccount, useDisconnectWallet, useSignAndExecuteTransaction, useSuiClient, ConnectModal } from "@mysten/dapp-kit";
+import { Transaction } from "@mysten/sui/transactions";
 import { Sheet } from "./components/Sheet";
 import { AddFieldModal } from "./components/AddFieldModal";
 import { DropdownPortal } from "./components/DropdownPortal";
@@ -75,8 +77,6 @@ import { TESTNET_CONFIG, testnetTxUrl } from "./config";
 import {
   createDraftForm,
   createDefaultSchema,
-  demoAddress,
-  digest,
   deleteForm,
   getForm,
   getForms,
@@ -126,7 +126,7 @@ function fieldHint(type: FieldType) {
     checkboxes: "Use for multiple choices. Add at least one option before publishing.",
     rating: "Collects a one-to-five star score.",
     image: "Accepts screenshots or image attachments.",
-    video: "Accepts short demo videos or screen recordings.",
+    video: "Accepts short videos or screen recordings.",
     url: "Accepts only full http or https links.",
   };
   return hints[type];
@@ -163,10 +163,44 @@ function schemaFingerprint(schema: FormSchema) {
   return JSON.stringify({
     title: schema.title,
     description: schema.description,
-    encrypted: schema.encrypted,
+    layout: schema.layout,
     fields: schema.fields.map(({ id: fieldId, ...field }) => ({ id: fieldId, ...field })),
   });
 }
+
+function contractTarget(functionName: "create_form" | "submit" | "set_submission_status") {
+  if (!TESTNET_CONFIG.tusktablePackageId) {
+    throw new Error("Set VITE_TUSKTABLE_PACKAGE_ID to your published Sui Testnet package ID.");
+  }
+  return `${TESTNET_CONFIG.tusktablePackageId}::forms::${functionName}`;
+}
+
+function findCreatedFormObjectId(tx: unknown) {
+  const changes = (tx as { objectChanges?: Array<{ type?: string; objectType?: string; objectId?: string }> }).objectChanges ?? [];
+  const formType = `${TESTNET_CONFIG.tusktablePackageId}::forms::Form`.toLowerCase();
+  return changes.find((change) => change.type === "created" && change.objectType?.toLowerCase() === formType)?.objectId ?? "";
+}
+
+function findSubmissionEventId(tx: unknown) {
+  const events = (tx as { events?: Array<{ type?: string; parsedJson?: { submission_id?: string | number } }> }).events ?? [];
+  const eventType = `${TESTNET_CONFIG.tusktablePackageId}::forms::SubmissionEvent`.toLowerCase();
+  const event = events.find((item) => item.type?.toLowerCase() === eventType);
+  const value = event?.parsedJson?.submission_id;
+  return value === undefined ? "" : String(value);
+}
+
+const statusCode: Record<Submission["status"], number> = {
+  new: 0,
+  reviewed: 1,
+  prioritized: 2,
+  archived: 3,
+};
+
+const priorityCode: Record<Submission["priority"], number> = {
+  low: 0,
+  medium: 1,
+  high: 2,
+};
 
 function formUiStatus(form: StoredForm) {
   if (form.status === "draft") return "draft";
@@ -249,7 +283,11 @@ function AppProvider({ children }: { children: React.ReactNode }) {
 
   const toggleTheme = () => setTheme(current => current === "light" ? "dark" : "light");
 
-  return <ThemeContext.Provider value={{ theme, toggleTheme }}>{children}</ThemeContext.Provider>;
+  return (
+    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+      {children}
+    </ThemeContext.Provider>
+  );
 }
 
 function App() {
@@ -290,6 +328,68 @@ function App() {
   );
 }
 
+function WalletPill() {
+  const account = useCurrentAccount();
+  const { mutate: disconnect } = useDisconnectWallet();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    if (menuOpen) {
+      document.addEventListener("mousedown", onDocClick);
+      return () => document.removeEventListener("mousedown", onDocClick);
+    }
+  }, [menuOpen]);
+
+  const handleCopy = async () => {
+    if (!account?.address) return;
+    await navigator.clipboard.writeText(account.address);
+    toast.success("Address copied to clipboard");
+    setMenuOpen(false);
+  };
+
+  if (!account) {
+    return (
+      <ConnectModal
+        trigger={
+          <button className="wallet-pill wallet-pill--connect">
+            <Wallet size={14} />
+            <span className="wallet-label">Connect Wallet</span>
+          </button>
+        }
+      />
+    );
+  }
+
+  return (
+    <div className="wallet-pill-wrapper" ref={menuRef}>
+      <button className="wallet-pill" onClick={() => setMenuOpen((v) => !v)} aria-expanded={menuOpen}>
+        <span className="wallet-dot" />
+        <span className="wallet-label">{shortAddress(account.address)}</span>
+        <ChevronDown size={12} />
+      </button>
+      {menuOpen && (
+        <div className="wallet-dropdown">
+          <div className="wallet-dropdown-item" onClick={handleCopy}>
+            <Copy size={14} />
+            Copy Address
+          </div>
+          <div className="wallet-dropdown-sep" />
+          <div className="wallet-dropdown-item wallet-dropdown-item--danger" onClick={() => { disconnect(); setMenuOpen(false); }}>
+            <X size={14} />
+            Disconnect
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TopBar({ navigate }: { navigate: (path: string) => void }) {
   const { theme, toggleTheme } = useContext(ThemeContext);
 
@@ -309,10 +409,7 @@ function TopBar({ navigate }: { navigate: (path: string) => void }) {
         </span>
       </button>
       <div className="topbar-actions">
-        <div className="wallet-pill" title="Demo session">
-          <span className="wallet-dot" />
-          <span className="wallet-label">{shortAddress(demoAddress())}</span>
-        </div>
+        <WalletPill />
         <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme">
           {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
         </button>
@@ -321,14 +418,73 @@ function TopBar({ navigate }: { navigate: (path: string) => void }) {
   );
 }
 
+function FormWalletPill() {
+  const account = useCurrentAccount();
+  const { mutate: disconnect } = useDisconnectWallet();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    if (menuOpen) {
+      document.addEventListener("mousedown", onDocClick);
+      return () => document.removeEventListener("mousedown", onDocClick);
+    }
+  }, [menuOpen]);
+
+  const handleCopy = async () => {
+    if (!account?.address) return;
+    await navigator.clipboard.writeText(account.address);
+    toast.success("Address copied to clipboard");
+    setMenuOpen(false);
+  };
+
+  if (!account) {
+    return (
+      <ConnectModal
+        trigger={
+          <button className="form-control-pill form-control-pill--connect">
+            <Wallet size={12} />
+            <span className="form-control-address">Connect</span>
+          </button>
+        }
+      />
+    );
+  }
+
+  return (
+    <div className="wallet-pill-wrapper" ref={menuRef}>
+      <button className="form-control-pill" onClick={() => setMenuOpen((v) => !v)} aria-expanded={menuOpen}>
+        <span className="form-control-dot" />
+        <span className="form-control-address">{shortAddress(account.address)}</span>
+        <ChevronDown size={12} />
+      </button>
+      {menuOpen && (
+        <div className="wallet-dropdown wallet-dropdown--form">
+          <div className="wallet-dropdown-item" onClick={handleCopy}>
+            <Copy size={14} />
+            Copy Address
+          </div>
+          <div className="wallet-dropdown-sep" />
+          <div className="wallet-dropdown-item wallet-dropdown-item--danger" onClick={() => { disconnect(); setMenuOpen(false); }}>
+            <X size={14} />
+            Disconnect
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FormControls() {
   const { theme, toggleTheme } = useContext(ThemeContext);
   return (
     <div className="form-controls">
-      <div className="form-control-pill" title="Demo session">
-        <span className="form-control-dot" />
-        <span className="form-control-address">{shortAddress(demoAddress())}</span>
-      </div>
+      <FormWalletPill />
       <button className="form-control-theme" onClick={toggleTheme} aria-label="Toggle theme">
         {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
       </button>
@@ -341,6 +497,7 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "draft" | "published">("all");
   const [copiedId, setCopiedId] = useState("");
+  const account = useCurrentAccount();
 
   useEffect(() => {
     setForms(getForms());
@@ -363,7 +520,11 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
   }, [forms]);
 
   function newForm() {
-    const form = createDraftForm();
+    if (!account?.address) {
+      toast.error("Connect your wallet to create a form.");
+      return;
+    }
+    const form = createDraftForm(undefined, account.address);
     navigate(`/builder/${form.id}`);
   }
 
@@ -531,6 +692,9 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
   const [mobileEditorOpen, setMobileEditorOpen] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
   const isMobile = useMediaQuery("(max-width: 767px)");
+  const account = useCurrentAccount();
+  const suiClient = useSuiClient();
+  const signAndExecute = useSignAndExecuteTransaction();
 
   const schemaIssues = useMemo(() => validateSchema(schema), [schema]);
   const issueByField = useMemo(() => {
@@ -561,7 +725,12 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
 
   useEffect(() => {
     if (!formId) {
-      const draft = createDraftForm();
+      if (!account?.address) {
+        toast.error("Connect your wallet to create a form.");
+        navigate("/forms");
+        return;
+      }
+      const draft = createDraftForm(undefined, account.address);
       setForm(draft);
       setSchema(draft.draftSchema);
       setSelectedId(draft.draftSchema.fields[0]?.id ?? "");
@@ -575,7 +744,12 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
       setSelectedId(existing.draftSchema.fields[0]?.id ?? "");
       return;
     }
-    const draft = createDraftForm();
+    if (!account?.address) {
+      toast.error("Connect your wallet to create a form.");
+      navigate("/forms");
+      return;
+    }
+    const draft = createDraftForm(undefined, account.address);
     setForm(draft);
     setSchema(draft.draftSchema);
     setSelectedId(draft.draftSchema.fields[0]?.id ?? "");
@@ -584,7 +758,7 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
 
   useEffect(() => {
     if (!form) return;
-    setForm(saveDraftForm(form.id, schema));
+    setForm(saveDraftForm(form.id, schema, form.owner));
   }, [schema]);
 
   // Beforeunload guard for unsaved changes
@@ -668,12 +842,34 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
       toast.error("Fix the highlighted field issues before publishing.");
       return;
     }
+    if (!account?.address) {
+      toast.error("Connect your wallet to publish this form.");
+      return;
+    }
     setBusy(true);
     try {
+      contractTarget("create_form");
       const nextSchema = { ...schema, id: id("schema"), createdAt: new Date().toISOString() };
       const schemaBlob = await uploadJson(nextSchema, "form-schema.json");
-      const current = form ?? createDraftForm(nextSchema);
-      const publishedForm = publishStoredForm(current.id, nextSchema, schemaBlob, digest());
+      const owner = account.address;
+      const current = form ?? createDraftForm(nextSchema, owner);
+      const tx = new Transaction();
+      tx.moveCall({
+        target: contractTarget("create_form"),
+        arguments: [
+          tx.pure.string(nextSchema.title),
+          tx.pure.string(nextSchema.description),
+          tx.pure.string(schemaBlob.id),
+        ],
+      });
+      const txResult = await signAndExecute.mutateAsync({ transaction: tx });
+      const txDetails = await suiClient.waitForTransaction({
+        digest: txResult.digest,
+        options: { showObjectChanges: true },
+      });
+      const suiObjectId = findCreatedFormObjectId(txDetails);
+      if (!suiObjectId) throw new Error("Sui transaction succeeded, but the created form object was not found.");
+      const publishedForm = publishStoredForm(current.id, nextSchema, schemaBlob, owner, txResult.digest, suiObjectId);
       setForm(publishedForm);
       setSchema(publishedForm.draftSchema);
       toast.success("Form published successfully to Walrus Testnet");
@@ -788,17 +984,6 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
               className="builder-settings-panel"
             >
               <div className="settings-card">
-                <p className="eyebrow">Privacy</p>
-                <h2>End-to-End Encryption</h2>
-                <label className="settings-toggle">
-                  <input type="checkbox" checked={schema.encrypted} onChange={(e) => setSchema({ ...schema, encrypted: e.target.checked })} />
-                  <span className="toggle-track"><span className="toggle-thumb" /></span>
-                  <span className="toggle-label"><Lock size={15} /> Seal private mode</span>
-                </label>
-                <p className="settings-hint">Payloads are encrypted client-side before uploading to Walrus decentralized storage.</p>
-              </div>
-              
-              <div className="settings-card">
                 <p className="eyebrow">Presentation</p>
                 <h2>Form Layout</h2>
                 <div className="layout-options">
@@ -836,17 +1021,21 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
                 </div>
               )}
               
-              {form?.status === "published" && form.schemaBlob && form.txDigest && (
+              {form?.status === "published" && form.schemaBlob && (
                 <div className="settings-card">
-                  <p className="eyebrow">Blockchain Proofs</p>
+                  <p className="eyebrow">Storage Proofs</p>
                   <h2>Receipts</h2>
                   <div className="receipt" style={{marginTop: 12}}>
                     <p>Schema blob</p>
                     <code>{form.schemaBlob.id}</code>
-                    <p>Sui testnet transaction</p>
-                    <a className="proof-link" href={testnetTxUrl(form.txDigest)} target="_blank" rel="noreferrer">
-                      {form.txDigest}
-                    </a>
+                    {form.txDigest && (
+                      <>
+                        <p>Sui testnet transaction</p>
+                        <a className="proof-link" href={testnetTxUrl(form.txDigest)} target="_blank" rel="noreferrer">
+                          {form.txDigest}
+                        </a>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -1151,11 +1340,11 @@ function FieldPreview({ field }: { field: Field }) {
         {field.required ? <em>Required</em> : null}
       </div>
       {field.helper ? <p className="field-preview-helper">{field.helper}</p> : null}
-      {field.type === "shortText" && <div className="fake-input" />}
-      {field.type === "richText" && <div className="fake-textarea" />}
-      {field.type === "url" && <div className="fake-input with-icon">https://</div>}
+      {field.type === "shortText" && <div className="preview-input" />}
+      {field.type === "richText" && <div className="preview-textarea" />}
+      {field.type === "url" && <div className="preview-input with-icon">https://</div>}
       {field.type === "rating" && <div className="stars" style={{fontSize: 22}}>{"★★★★★"}</div>}
-      {field.type === "dropdown" && <div className="fake-input">{field.options?.[0] ?? "Select"}</div>}
+      {field.type === "dropdown" && <div className="preview-input">{field.options?.[0] ?? "Select"}</div>}
       {field.type === "checkboxes" && (
         <div className="chips">{field.options?.map((option) => <span key={option}>{option}</span>)}</div>
       )}
@@ -1200,6 +1389,9 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
   const [activeStep, setActiveStep] = useState(0);
   const [direction, setDirection] = useState(1);
   const [showProofs, setShowProofs] = useState(false);
+  const account = useCurrentAccount();
+  const suiClient = useSuiClient();
+  const signAndExecute = useSignAndExecuteTransaction();
 
   useEffect(() => {
     setErrors({});
@@ -1323,6 +1515,14 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
   }
 
   async function handleSubmit() {
+    if (!account?.address) {
+      toast.error("Connect your wallet to submit this form.");
+      return;
+    }
+    if (!activeForm.suiObjectId) {
+      toast.error("This form is missing its Sui object ID. Republish it after configuring the testnet package.");
+      return;
+    }
     const nextErrors = validateAll();
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
@@ -1345,22 +1545,36 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
 
     setBusy(true);
     try {
+      contractTarget("submit");
       const media: Record<string, BlobReceipt> = {};
       for (const [fieldId, file] of Object.entries(files)) {
         media[fieldId] = await uploadFile(file);
       }
+      const submitter = account.address;
       const payload = {
         formId: activeForm.id,
         values: { ...values },
         media,
-        submitter: demoAddress(),
-        encrypted: activeSchema.encrypted,
+        submitter,
         createdAt: new Date().toISOString(),
       };
-      const storedPayload = activeSchema.encrypted
-        ? { seal: "demo-private-mode", ciphertext: btoa(JSON.stringify(payload)) }
-        : payload;
-      const submissionBlob = await uploadJson(storedPayload, "submission.json");
+      const submissionBlob = await uploadJson(payload, "submission.json");
+      const tx = new Transaction();
+      tx.moveCall({
+        target: contractTarget("submit"),
+        arguments: [
+          tx.object(activeForm.suiObjectId),
+          tx.pure.string(submissionBlob.id),
+          tx.pure.vector("string", Object.values(media).map((receipt) => receipt.id)),
+        ],
+      });
+      const txResult = await signAndExecute.mutateAsync({ transaction: tx });
+      const txDetails = await suiClient.waitForTransaction({
+        digest: txResult.digest,
+        options: { showEvents: true },
+      });
+      const chainSubmissionId = findSubmissionEventId(txDetails);
+      if (!chainSubmissionId) throw new Error("Sui transaction succeeded, but the submission event was not found.");
       const submission: Submission = {
         id: id("sub"),
         formId: activeForm.id,
@@ -1368,8 +1582,9 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
         values: { ...values, ...media },
         media,
         submissionBlob,
-        txDigest: digest(),
-        submitter: demoAddress(),
+        txDigest: txResult.digest,
+        chainSubmissionId,
+        submitter,
         createdAt: new Date().toISOString(),
         status: "new",
         priority: "medium",
@@ -1440,9 +1655,6 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
               <Triangle size={10} fill="currentColor" style={{ transform: "rotate(180deg)" }} />
             </button>
           </span>
-        )}
-        {activeSchema.encrypted && (
-          <span className="step-pill encrypted"><Lock size={12} /> Private</span>
         )}
       </div>
 
@@ -1562,7 +1774,7 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
               </motion.span>
             )}
           </AnimatePresence>
-          <span className="walrus-pill-label">Powered by {activeForm.schemaBlob?.storage === "walrus" ? "Walrus" : "Local"}</span>
+          <span className="walrus-pill-label">Powered by Walrus</span>
         </button>
       </footer>
     </div>
@@ -1593,7 +1805,7 @@ function PublicFormSuccess({ receipt, formId, navigate }: { receipt: Submission;
         </div>
         <div className="typeform-success-proof">
           <span>Blob: {receipt.submissionBlob.id.slice(0, 20)}...</span>
-          <a href={testnetTxUrl(receipt.txDigest)} target="_blank" rel="noreferrer">View tx ↗</a>
+          {receipt.txDigest && <a href={testnetTxUrl(receipt.txDigest)} target="_blank" rel="noreferrer">View tx ↗</a>}
         </div>
       </motion.div>
     </section>
@@ -1794,6 +2006,8 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
   const priorityMenuRef = useRef<HTMLDivElement>(null);
   const statusPos = useDropdownPosition(statusRef, statusOpen);
   const priorityPos = useDropdownPosition(priorityRef, priorityOpen);
+  const account = useCurrentAccount();
+  const signAndExecute = useSignAndExecuteTransaction();
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -1848,10 +2062,35 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
     );
   }
 
-  function patchSubmission(submission: Submission, patch: Partial<Submission>) {
+  async function patchSubmission(submission: Submission, patch: Partial<Submission>) {
+    if (!account?.address) {
+      toast.error("Connect the form owner wallet to update response status.");
+      return;
+    }
+    if (!activeForm.suiObjectId || !submission.chainSubmissionId) {
+      toast.error("This response is missing Sui on-chain IDs and cannot be updated on testnet.");
+      return;
+    }
     const next = { ...submission, ...patch };
-    updateSubmission(next);
-    setSubmissions(getSubmissions(formId));
+    try {
+      const tx = new Transaction();
+      tx.moveCall({
+        target: contractTarget("set_submission_status"),
+        arguments: [
+          tx.object(activeForm.suiObjectId),
+          tx.pure.u64(submission.chainSubmissionId),
+          tx.pure.u8(statusCode[next.status]),
+          tx.pure.u8(priorityCode[next.priority]),
+        ],
+      });
+      await signAndExecute.mutateAsync({ transaction: tx });
+      updateSubmission(next);
+      setSubmissions(getSubmissions(formId));
+      toast.success("Response status updated on Sui Testnet");
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Unable to update response status on Sui Testnet.";
+      toast.error(msg);
+    }
   }
 
   function exportCsv() {
@@ -1863,7 +2102,7 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
     const rows = filtered.map((submission) =>
       [
         submission.id, submission.createdAt, submission.status, submission.priority,
-        submission.submitter, submission.submissionBlob.id, submission.txDigest,
+        submission.submitter, submission.submissionBlob.id, submission.txDigest ?? "",
         ...fields.map((field) => formatValue(submission.values[field.id])),
       ].map(csvCell),
     );

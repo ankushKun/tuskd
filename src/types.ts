@@ -21,7 +21,6 @@ export type FormSchema = {
   id: string;
   title: string;
   description: string;
-  encrypted: boolean;
   layout?: "standard" | "slides";
   createdAt: string;
   fields: Field[];
@@ -29,8 +28,8 @@ export type FormSchema = {
 
 export type BlobReceipt = {
   id: string;
-  storage: "walrus" | "local";
-  network: "walrus-testnet" | "local-fallback";
+  storage: "walrus";
+  network: "walrus-testnet";
   url: string;
   type: "json" | "file";
   name?: string;
@@ -44,7 +43,8 @@ export type PublishedForm = {
   network: "sui-testnet";
   schemaBlob: BlobReceipt;
   schema: FormSchema;
-  txDigest: string;
+  txDigest?: string;
+  suiObjectId?: string;
   createdAt: string;
 };
 
@@ -57,6 +57,7 @@ export type StoredForm = {
   schema?: FormSchema;
   schemaBlob?: BlobReceipt;
   txDigest?: string;
+  suiObjectId?: string;
   createdAt: string;
   updatedAt: string;
   publishedAt?: string;
@@ -69,7 +70,8 @@ export type Submission = {
   values: Record<string, string | string[] | number | BlobReceipt | null>;
   media: Record<string, BlobReceipt>;
   submissionBlob: BlobReceipt;
-  txDigest: string;
+  txDigest?: string;
+  chainSubmissionId?: string;
   submitter: string;
   createdAt: string;
   status: "new" | "reviewed" | "prioritized" | "archived";

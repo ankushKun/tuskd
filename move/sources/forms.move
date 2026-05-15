@@ -10,7 +10,6 @@ module tusktable::forms {
         title: String,
         description: String,
         schema_blob_id: String,
-        encrypted: bool,
         submission_count: u64,
     }
 
@@ -33,7 +32,6 @@ module tusktable::forms {
         title: String,
         description: String,
         schema_blob_id: String,
-        encrypted: bool,
         ctx: &mut TxContext,
     ) {
         let form = Form {
@@ -42,7 +40,6 @@ module tusktable::forms {
             title,
             description,
             schema_blob_id,
-            encrypted,
             submission_count: 0,
         };
 
@@ -87,10 +84,6 @@ module tusktable::forms {
 
     public fun schema_blob_id(form: &Form): &String {
         &form.schema_blob_id
-    }
-
-    public fun encrypted(form: &Form): bool {
-        form.encrypted
     }
 
     public fun submission_count(form: &Form): u64 {

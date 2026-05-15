@@ -9,9 +9,9 @@ This project is configured for **Sui Testnet** and **Walrus Testnet** for now.
 - Build structured feedback forms with required fields, ratings, dropdowns, checkboxes, URLs, rich text, screenshots, and video uploads.
 - Manage draft and published forms from a creator dashboard.
 - Publish shareable form links.
-- Store schemas, submissions, and media through a Walrus upload client with a local-first fallback for demos.
+- Store schemas, submissions, and media through Walrus Testnet.
 - Review, filter, prioritize, and export submissions from an admin dashboard.
-- Show Sui-style receipts and transaction digests so every submission has a verifiable audit trail.
+- Show Walrus receipts and real Sui Testnet transaction digests from the Move package calls.
 - Include a minimal Sui Move package in `move/` for the form object and submission/status events.
 
 ## Run locally
@@ -31,9 +31,9 @@ VITE_WALRUS_AGGREGATOR=https://aggregator.walrus-testnet.walrus.space
 VITE_WALRUS_EPOCHS=5
 ```
 
-Without those endpoints or if the Walrus testnet call fails, TuskTable stores demo blobs in browser storage and labels them as local fallback blobs.
+Walrus and Sui Testnet calls are required. Upload or transaction failures stop the publish/submit flow instead of falling back to browser-only storage.
 
-## Demo flow
+## Local Flow
 
 1. Open `/forms`.
 2. Create a draft from the forms dashboard.
@@ -46,8 +46,8 @@ Without those endpoints or if the Walrus testnet call fails, TuskTable stores de
 
 The Move package in `move/` defines the intended on-chain contract:
 
-- `create_form(title, description, schema_blob_id, encrypted)`
+- `create_form(title, description, schema_blob_id)`
 - `submit(form, submission_blob_id, media_blob_ids)`
 - `set_submission_status(form, submission_id, status, priority)`
 
-The frontend currently uses a testnet-labeled receipt adapter for fast hackathon demos. Replace that adapter with calls to the package after publishing it to Sui testnet.
+Publish, submit, and response status changes are wallet-signed Sui Testnet transactions. Deploy the package in `move/`, then set `VITE_TUSKTABLE_PACKAGE_ID` to the published package ID.
