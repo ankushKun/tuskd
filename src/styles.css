@@ -314,7 +314,7 @@ code {
   justify-content: center;
   position: relative;
   height: 24px;
-  margin: -6px 0;
+  margin: 4px 0;
   opacity: 0;
   transition: opacity 0.2s;
   z-index: 5;
@@ -339,10 +339,8 @@ code {
   font-weight: 600;
   color: var(--fg-muted);
   box-shadow: var(--shadow-float);
-  transform: translateY(-50%);
 }
 .add-field-container.bottom .add-field-btn {
-  transform: none;
   padding: 12px 24px;
   font-size: 15px;
 }
@@ -367,10 +365,13 @@ code {
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   z-index: 50;
-  margin-top: -12px;
+  margin-top: 8px;
 }
 .add-field-container.bottom .field-type-popover {
-  margin-top: 8px;
+  top: auto;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: 8px;
 }
 .field-type-popover button {
   display: flex;

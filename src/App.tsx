@@ -34,7 +34,7 @@ import {
   ArrowLeft,
   ArrowRight,
 } from "lucide-react";
-import React, { useEffect, useMemo, useState, createContext, useContext } from "react";
+import React, { useEffect, useMemo, useState, createContext, useContext, useRef } from "react";
 import { toast } from "sonner";
 import {
   DndContext,
@@ -789,8 +789,24 @@ function FieldEditorInline({ field, updateField }: { field: Field, updateField: 
 
 function AddFieldButton({ onSelect, isBottom }: { onSelect: (type: FieldType) => void, isBottom?: boolean }) {
   const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    if (open) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [open]);
+
   return (
-    <div className={`add-field-container ${isBottom ? 'bottom' : ''}`} onMouseLeave={() => setOpen(false)}>
+    <div ref={containerRef} className={`add-field-container ${isBottom ? 'bottom' : ''}`}>
       <button className="add-field-btn" onClick={() => setOpen(!open)}>
         <Plus size={16} /> {isBottom && "Add Question"}
       </button>
