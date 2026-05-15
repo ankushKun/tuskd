@@ -698,7 +698,8 @@ function SortableField({
 
   return (
     <div ref={setNodeRef} style={style}>
-      <div 
+      <motion.div 
+        layout
         className={`inline-field-shell ${isSelected ? "selected" : ""} ${issue?.length ? "has-issue" : ""}`}
         onClick={() => !isSelected && onSelect()}
       >
@@ -708,48 +709,50 @@ function SortableField({
           <button className="danger" onClick={(e) => { e.stopPropagation(); onRemove(); }}><Trash2 size={16}/></button>
         </div>
         
-        {isSelected ? (
-          <motion.div initial={{opacity: 0, height: 0}} animate={{opacity: 1, height: "auto"}} transition={{duration: 0.2}}>
-            <div style={{display: 'flex', gap: 12, alignItems: 'center'}}>
-               <span className="field-number">{index + 1}</span>
-               <input 
-                 className="title-input" 
-                 style={{fontSize: 20, padding: 0, flex: 1}} 
-                 value={field.label} 
-                 onChange={e => onUpdate({label: e.target.value})} 
-                 placeholder="Question..." 
-                 autoFocus
-               />
-            </div>
-            <div className="inline-field-editor-content">
-               <textarea 
-                 className="description-input" 
-                 style={{minHeight: 32, marginTop: 0}} 
-                 value={field.helper ?? ""} 
-                 onChange={e => onUpdate({helper: e.target.value})} 
-                 placeholder="Description or instructions (optional)..."
-               />
-               <FieldEditorInline field={field} updateField={onUpdate} />
-               <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12}}>
-                 <label className="switch-row" style={{display: 'flex', alignItems: 'center'}}>
-                   <input type="checkbox" checked={field.required} onChange={e => onUpdate({required: e.target.checked})} style={{width: 'auto'}} />
-                   <span style={{fontWeight: 600}}>Required</span>
-                 </label>
-                 {issue && issue.length > 0 && (
-                   <span style={{color: 'var(--danger)', fontSize: 13, fontWeight: 600}}><AlertCircle size={14} style={{display: 'inline', verticalAlign: 'middle', marginRight: 4}}/>{issue[0]}</span>
-                 )}
-               </div>
-            </div>
-          </motion.div>
-        ) : (
-          <div style={{pointerEvents: 'none'}}>
-            <div style={{display: 'flex', gap: 12, alignItems: 'flex-start'}}>
-               <span className="field-number">{index + 1}</span>
-               <FieldPreview field={field} issues={issue ?? []} />
-            </div>
-          </div>
-        )}
-      </div>
+        <AnimatePresence mode="popLayout">
+          {isSelected ? (
+            <motion.div key="editor" initial={{opacity: 0}} animate={{opacity: 1}} exit={{opacity: 0}} transition={{duration: 0.2}}>
+              <div style={{display: 'flex', gap: 12, alignItems: 'center'}}>
+                 <span className="field-number">{index + 1}</span>
+                 <input 
+                   className="title-input" 
+                   style={{fontSize: 20, padding: 0, flex: 1}} 
+                   value={field.label} 
+                   onChange={e => onUpdate({label: e.target.value})} 
+                   placeholder="Question..." 
+                   autoFocus
+                 />
+              </div>
+              <div className="inline-field-editor-content">
+                 <textarea 
+                   className="description-input" 
+                   style={{minHeight: 32, marginTop: 0}} 
+                   value={field.helper ?? ""} 
+                   onChange={e => onUpdate({helper: e.target.value})} 
+                   placeholder="Description or instructions (optional)..."
+                 />
+                 <FieldEditorInline field={field} updateField={onUpdate} />
+                 <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12}}>
+                   <label className="switch-row" style={{display: 'flex', alignItems: 'center'}}>
+                     <input type="checkbox" checked={field.required} onChange={e => onUpdate({required: e.target.checked})} style={{width: 'auto'}} />
+                     <span style={{fontWeight: 600}}>Required</span>
+                   </label>
+                   {issue && issue.length > 0 && (
+                     <span style={{color: 'var(--danger)', fontSize: 13, fontWeight: 600}}><AlertCircle size={14} style={{display: 'inline', verticalAlign: 'middle', marginRight: 4}}/>{issue[0]}</span>
+                   )}
+                 </div>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div key="preview" initial={{opacity: 0}} animate={{opacity: 1}} exit={{opacity: 0}} transition={{duration: 0.2}} style={{pointerEvents: 'none'}}>
+              <div style={{display: 'flex', gap: 12, alignItems: 'flex-start'}}>
+                 <span className="field-number">{index + 1}</span>
+                 <FieldPreview field={field} issues={issue ?? []} />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
     </div>
   )
 }
