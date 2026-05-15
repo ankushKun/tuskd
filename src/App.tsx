@@ -269,10 +269,12 @@ function App() {
   const adminMatch = path.match(/^\/admin\/([^/]+)/);
   const builderMatch = path.match(/^\/builder(?:\/([^/]+))?$/);
 
+  const isPublicForm = Boolean(formMatch);
+
   return (
     <AppProvider>
       <main>
-        <TopBar navigate={navigate} />
+        {isPublicForm ? <FormControls /> : <TopBar navigate={navigate} />}
         {formMatch ? (
           <PublicForm formId={formMatch[1]} navigate={navigate} />
         ) : adminMatch ? (
@@ -315,6 +317,21 @@ function TopBar({ navigate }: { navigate: (path: string) => void }) {
         </button>
       </div>
     </header>
+  );
+}
+
+function FormControls() {
+  const { theme, toggleTheme } = useContext(ThemeContext);
+  return (
+    <div className="form-controls">
+      <div className="form-control-pill" title="Demo session">
+        <span className="form-control-dot" />
+        <span className="form-control-address">{shortAddress(demoAddress())}</span>
+      </div>
+      <button className="form-control-theme" onClick={toggleTheme} aria-label="Toggle theme">
+        {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+      </button>
+    </div>
   );
 }
 

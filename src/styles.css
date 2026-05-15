@@ -3298,7 +3298,62 @@ h2 {
   color: var(--fg);
 }
 
-/* Mobile */
+/* ===== Form Controls (minimal floating bar for public forms) ===== */
+.form-controls {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.form-control-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  background: var(--bg-float);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  box-shadow: var(--shadow-float);
+}
+.form-control-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--success);
+  flex-shrink: 0;
+}
+.form-control-address {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+.form-control-theme {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: var(--bg-float);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  box-shadow: var(--shadow-float);
+}
+.form-control-theme:hover {
+  background: var(--bg-muted);
+  color: var(--fg);
+}
+
 @media (max-width: 700px) {
   .public-form-header {
     padding: 32px 16px 20px;
