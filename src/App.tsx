@@ -33,6 +33,18 @@ import {
   Columns3,
   ArrowLeft,
   ArrowRight,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  Upload,
+  Filter,
+  Calendar,
+  Clock,
+  FileText,
+  Inbox,
+  TrendingUp,
+  Eye,
+  MoreHorizontal,
 } from "lucide-react";
 import React, { useEffect, useMemo, useState, createContext, useContext, useRef } from "react";
 import { toast } from "sonner";
@@ -282,6 +294,13 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
     });
   }, [filter, forms, query]);
 
+  const stats = useMemo(() => {
+    const published = forms.filter((f) => formUiStatus(f) === "published").length;
+    const drafts = forms.filter((f) => { const s = formUiStatus(f); return s === "draft" || s === "dirty"; }).length;
+    const totalResponses = forms.reduce((sum, f) => sum + responseCount(f.id), 0);
+    return { total: forms.length, published, drafts, totalResponses };
+  }, [forms]);
+
   function newForm() {
     const form = createDraftForm();
     navigate(`/builder/${form.id}`);
@@ -305,11 +324,10 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
 
   return (
     <section className="forms-home">
-      <div className="forms-hero">
+      <div className="forms-home-header">
         <div>
-          <p className="eyebrow">Workspace</p>
           <h1>Your forms</h1>
-          <p className="muted">Create drafts, publish share links, and review responses from one simple dashboard.</p>
+          <p className="muted">Create, publish, and manage feedback forms on Walrus.</p>
         </div>
         <button className="primary" onClick={newForm}>
           <Plus size={16} />
@@ -317,37 +335,74 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
         </button>
       </div>
 
-      <div className="forms-toolbar">
-        <label className="search-box">
+      {forms.length > 0 && (
+        <div className="forms-stats">
+          <div className="forms-stat">
+            <div className="forms-stat-icon"><FileText size={18} /></div>
+            <div className="forms-stat-value">{stats.total}</div>
+            <div className="forms-stat-label">Total forms</div>
+          </div>
+          <div className="forms-stat">
+            <div className="forms-stat-icon published"><Check size={18} /></div>
+            <div className="forms-stat-value">{stats.published}</div>
+            <div className="forms-stat-label">Published</div>
+          </div>
+          <div className="forms-stat">
+            <div className="forms-stat-icon draft"><Clock size={18} /></div>
+            <div className="forms-stat-value">{stats.drafts}</div>
+            <div className="forms-stat-label">Drafts</div>
+          </div>
+          <div className="forms-stat">
+            <div className="forms-stat-icon"><Inbox size={18} /></div>
+            <div className="forms-stat-value">{stats.totalResponses}</div>
+            <div className="forms-stat-label">Responses</div>
+          </div>
+        </div>
+      )}
+
+      <div className="forms-home-toolbar">
+        <div className="search-box">
           <Search size={16} />
-          <input placeholder="Search forms" value={query} onChange={(event) => setQuery(event.target.value)} />
-        </label>
-        <div className="tabs">
+          <input placeholder="Search forms..." value={query} onChange={(e) => setQuery(e.target.value)} />
+          {query && (
+            <button className="search-clear" onClick={() => setQuery("")} aria-label="Clear search">
+              <X size={14} />
+            </button>
+          )}
+        </div>
+        <div className="filter-pills">
           {(["all", "draft", "published"] as const).map((item) => (
-            <button className={filter === item ? "active" : ""} key={item} onClick={() => setFilter(item)}>
-              {item === "all" ? "All" : item === "draft" ? "Drafts" : "Published"}
+            <button key={item} className={filter === item ? "active" : ""} onClick={() => setFilter(item)}>
+              {item === "all" ? `All` : item === "draft" ? `Drafts` : `Published`}
+              <span className="filter-pill-count">
+                {item === "all" ? stats.total : item === "draft" ? stats.drafts : stats.published}
+              </span>
             </button>
           ))}
         </div>
       </div>
 
       {forms.length === 0 ? (
-        <div className="empty-card forms-empty">
-          <MessageSquareText size={24} />
-          <strong>No forms yet</strong>
-          <span>Create a form, publish it, and collect responses on Walrus Testnet.</span>
+        <div className="empty-state">
+          <div className="empty-state-icon">
+            <FileText size={32} />
+          </div>
+          <h2>No forms yet</h2>
+          <p>Create a form, publish it, and start collecting responses on Walrus.</p>
           <button className="primary" onClick={newForm}>
-            <Plus size={16} />
-            New form
+            <Plus size={16} /> Create your first form
           </button>
         </div>
-      ) : null}
-
-      {forms.length > 0 && filteredForms.length === 0 ? (
-        <div className="empty-card forms-empty">
-          <AlertCircle size={24} />
-          <strong>No matching forms</strong>
-          <span>Clear search or switch filters.</span>
+      ) : filteredForms.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-state-icon">
+            <Search size={32} />
+          </div>
+          <h2>No matching forms</h2>
+          <p>Clear your search or try a different filter.</p>
+          <button className="secondary" onClick={() => { setQuery(""); setFilter("all"); }}>
+            <X size={16} /> Clear filters
+          </button>
         </div>
       ) : null}
 
@@ -358,45 +413,42 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
           const lastAt = lastSubmissionAt(form.id);
           return (
             <article className="form-card" key={form.id}>
-              <div className="form-card-top">
-                <span className={`form-status ${status}`}>{formStatusLabel(form)}</span>
-                <span>{count} response{count === 1 ? "" : "s"}</span>
+              <div className="form-card-header">
+                <span className={`form-status-badge ${status}`}>{formStatusLabel(form)}</span>
+                <div className="form-card-actions">
+                  <button onClick={() => navigate(`/builder/${form.id}`)} title="Edit">
+                    <Settings2 size={15} />
+                  </button>
+                  {form.status === "published" && (
+                    <>
+                      <button onClick={() => navigate(`/f/${form.id}`)} title="Open form">
+                        <ExternalLink size={15} />
+                      </button>
+                      <button onClick={() => navigate(`/admin/${form.id}`)} title="Responses">
+                        <BarChart3 size={15} />
+                      </button>
+                      <button onClick={() => copyFormLink(form)} title="Copy link">
+                        {copiedId === form.id ? <Check size={15} /> : <Clipboard size={15} />}
+                      </button>
+                    </>
+                  )}
+                  <button className="danger" onClick={() => handleDelete(form.id)} title="Delete">
+                    <Trash2 size={15} />
+                  </button>
+                </div>
               </div>
-              <h2>{form.draftSchema.title || "Untitled form"}</h2>
-              <p>{form.draftSchema.description || "No description"}</p>
-              <div className="form-meta">
-                <span>Updated {new Date(form.updatedAt).toLocaleDateString()}</span>
-                {lastAt ? <span>Last response {new Date(lastAt).toLocaleDateString()}</span> : null}
-                {form.schemaBlob ? <span>{form.schemaBlob.storage === "walrus" ? "Walrus Testnet" : "Local fallback"}</span> : null}
+              <div className="form-card-body" onClick={() => navigate(`/builder/${form.id}`)}>
+                <h2>{form.draftSchema.title || "Untitled form"}</h2>
+                <p>{form.draftSchema.description || "No description"}</p>
               </div>
-              <div className="form-actions">
-                <button onClick={() => navigate(`/builder/${form.id}`)}>
-                  <Settings2 size={15} />
-                  {form.status === "draft" ? "Continue editing" : "Edit"}
-                </button>
-                {form.status === "published" ? (
-                  <>
-                    <button onClick={() => navigate(`/f/${form.id}`)}>
-                      <ExternalLink size={15} />
-                      Open form
-                    </button>
-                    <button onClick={() => navigate(`/admin/${form.id}`)}>
-                      <BarChart3 size={15} />
-                      Responses
-                    </button>
-                    <button onClick={() => copyFormLink(form)}>
-                      {copiedId === form.id ? <Check size={15} /> : <Clipboard size={15} />}
-                      {copiedId === form.id ? "Copied" : "Copy link"}
-                    </button>
-                  </>
-                ) : null}
-                <button 
-                  onClick={() => handleDelete(form.id)}
-                  style={{ color: "var(--danger)", borderColor: "transparent", background: "transparent", marginLeft: "auto" }}
-                  aria-label="Delete form"
-                >
-                  <Trash2 size={15} />
-                </button>
+              <div className="form-card-footer">
+                <div className="form-card-meta">
+                  <span><Inbox size={13} /> {count} response{count === 1 ? "" : "s"}</span>
+                  <span><Calendar size={13} /> Updated {new Date(form.updatedAt).toLocaleDateString()}</span>
+                </div>
+                {lastAt && (
+                  <span className="form-card-last"><Clock size={12} /> Last response {new Date(lastAt).toLocaleDateString()}</span>
+                )}
               </div>
             </article>
           );
@@ -1057,15 +1109,17 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [receipt, setReceipt] = useState<Submission | null>(null);
   const [busy, setBusy] = useState(false);
-  const [submitError, setSubmitError] = useState("");
   const [activeStep, setActiveStep] = useState(0);
+  const [direction, setDirection] = useState(1);
+  const [showProofs, setShowProofs] = useState(false);
 
   useEffect(() => {
     setValues({});
     setFiles({});
     setErrors({});
     setReceipt(null);
-    setSubmitError("");
+    setActiveStep(0);
+    setShowProofs(false);
     const current = getForm(formId);
     if (!current) return;
     if (current.status !== "published" || !current.schemaBlob) {
@@ -1081,11 +1135,12 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
     return (
       <section className="center-state">
         <h1>Form not found</h1>
-        <p className="muted">This browser has no local record for that Sui form object yet.</p>
+        <p className="muted">This browser has no local record for that form yet.</p>
         <button className="primary" onClick={() => navigate("/builder")}>Create a form</button>
       </section>
     );
   }
+
   const activeForm = form;
   const publishedSchema = activeForm.schema;
 
@@ -1098,32 +1153,87 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
       </section>
     );
   }
-  const activeSchema = publishedSchema;
 
-  async function submit() {
-    const nextErrors: Record<string, string> = {};
-    const cleanedValues: Record<string, string | string[] | number> = { ...values };
-    for (const field of activeSchema.fields) {
-      const rawValue = values[field.id];
-      const value = typeof rawValue === "string" ? rawValue.trim() : rawValue;
-      if (typeof rawValue === "string") cleanedValues[field.id] = value;
-      const file = files[field.id];
-      const emptyArray = Array.isArray(value) && value.length === 0;
-      if (field.required && !value && !file) nextErrors[field.id] = "Required";
-      if (field.required && emptyArray) nextErrors[field.id] = "Required";
-      if (field.type === "url" && value) {
-        try {
-          const url = new URL(String(value));
-          if (url.protocol !== "http:" && url.protocol !== "https:") nextErrors[field.id] = "Use an http or https URL";
-        } catch {
-          nextErrors[field.id] = "Use a full URL";
-        }
+  const activeSchema = publishedSchema;
+  const isSlides = activeSchema.layout === "slides";
+  const currentField = activeSchema.fields[activeStep];
+  const totalFields = activeSchema.fields.length;
+  const requiredCount = activeSchema.fields.filter((f) => f.required).length;
+  const requiredAnswered = activeSchema.fields.filter((f) => {
+    if (!f.required) return true;
+    const v = values[f.id];
+    const hasFile = files[f.id];
+    if (f.type === "checkboxes") return Array.isArray(v) && v.length > 0;
+    if (f.type === "image" || f.type === "video") return hasFile;
+    return v !== undefined && v !== "" && v !== 0;
+  }).length;
+
+  function validateField(field: Field, value: unknown, file?: File): string {
+    const emptyArray = Array.isArray(value) && value.length === 0;
+    if (field.required && !value && !file) return "This question is required";
+    if (field.required && emptyArray) return "This question is required";
+    if (field.type === "url" && value) {
+      try {
+        const url = new URL(String(value));
+        if (url.protocol !== "http:" && url.protocol !== "https:") return "Please enter a valid http or https URL";
+      } catch {
+        return "Please enter a valid URL";
       }
     }
-    setErrors(nextErrors);
-    if (Object.keys(nextErrors).length) return;
+    return "";
+  }
 
-    setSubmitError("");
+  function validateAll(): Record<string, string> {
+    const nextErrors: Record<string, string> = {};
+    for (const field of activeSchema.fields) {
+      const err = validateField(field, values[field.id], files[field.id]);
+      if (err) nextErrors[field.id] = err;
+    }
+    return nextErrors;
+  }
+
+  function handleNext() {
+    if (!currentField) return;
+    const err = validateField(currentField, values[currentField.id], files[currentField.id]);
+    if (err) {
+      setErrors((prev) => ({ ...prev, [currentField.id]: err }));
+      return;
+    }
+    setErrors((prev) => ({ ...prev, [currentField.id]: "" }));
+    if (activeStep < totalFields - 1) {
+      setDirection(1);
+      setActiveStep((s) => s + 1);
+    }
+  }
+
+  function handlePrev() {
+    if (activeStep > 0) {
+      setDirection(-1);
+      setActiveStep((s) => s - 1);
+    }
+  }
+
+  async function handleSubmit() {
+    const nextErrors = validateAll();
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length) {
+      if (isSlides) {
+        const firstErrorIndex = activeSchema.fields.findIndex((f) => nextErrors[f.id]);
+        if (firstErrorIndex >= 0) {
+          setDirection(firstErrorIndex > activeStep ? 1 : -1);
+          setActiveStep(firstErrorIndex);
+        }
+      } else {
+        const firstErrorField = activeSchema.fields.find((f) => nextErrors[f.id]);
+        if (firstErrorField) {
+          const el = document.getElementById(`q-${firstErrorField.id}`);
+          if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }
+      toast.error("Please answer all required questions");
+      return;
+    }
+
     setBusy(true);
     try {
       const media: Record<string, BlobReceipt> = {};
@@ -1132,19 +1242,21 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
       }
       const payload = {
         formId: activeForm.id,
-        values: cleanedValues,
+        values: { ...values },
         media,
         submitter: demoAddress(),
         encrypted: activeSchema.encrypted,
         createdAt: new Date().toISOString(),
       };
-      const storedPayload = activeSchema.encrypted ? { seal: "demo-private-mode", ciphertext: btoa(JSON.stringify(payload)) } : payload;
+      const storedPayload = activeSchema.encrypted
+        ? { seal: "demo-private-mode", ciphertext: btoa(JSON.stringify(payload)) }
+        : payload;
       const submissionBlob = await uploadJson(storedPayload, "submission.json");
       const submission: Submission = {
         id: id("sub"),
         formId: activeForm.id,
         network: "sui-testnet",
-        values: { ...cleanedValues, ...media },
+        values: { ...values, ...media },
         media,
         submissionBlob,
         txDigest: digest(),
@@ -1155,159 +1267,218 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
       };
       saveSubmission(submission);
       setReceipt(submission);
-      toast.success("Feedback submitted successfully!");
+      toast.success("Submitted successfully!");
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Unable to submit this response.";
-      setSubmitError(msg);
       toast.error(msg);
     } finally {
       setBusy(false);
     }
   }
 
-  function resetResponse() {
-    setValues({});
-    setFiles({});
-    setErrors({});
-    setReceipt(null);
-    setSubmitError("");
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (!isSlides) return;
+      if (e.key === "Enter" && !e.shiftKey && e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        if (activeStep < totalFields - 1) handleNext();
+        else handleSubmit();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeStep, values, files, activeSchema, isSlides, totalFields]);
+
+  useEffect(() => {
+    if (!isSlides) return;
+    const timer = setTimeout(() => {
+      const el = document.querySelector<HTMLElement>(".slides-question-wrapper input, .slides-question-wrapper textarea, .slides-question-wrapper select");
+      if (el) el.focus();
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [activeStep, isSlides]);
 
   if (receipt) {
-    return (
-      <section className="receipt-page">
-        <div className="receipt-card large">
-          <div className="status-dot">Submitted</div>
-          <h1>Feedback recorded on the Walrus rail.</h1>
-          <p className="muted">Your answers were stored as a submission blob and prepared for Sui testnet indexing.</p>
-          <dl>
-            <dt>Submission blob</dt>
-            <dd>{receipt.submissionBlob.id}</dd>
-            <dt>Sui testnet transaction</dt>
-            <dd>
-              <a className="proof-link" href={testnetTxUrl(receipt.txDigest)} target="_blank" rel="noreferrer">
-                {receipt.txDigest}
-              </a>
-            </dd>
-            <dt>Storage</dt>
-            <dd>{receipt.submissionBlob.storage === "walrus" ? "Walrus testnet" : "Local fallback because testnet upload was unavailable"}</dd>
-          </dl>
-          <div className="split-actions">
-            <button onClick={() => navigate(`/admin/${activeForm.id}`)}>
-              <BarChart3 size={16} />
-              Review
-            </button>
-            <button onClick={resetResponse}>
-              <Plus size={16} />
-              Another response
-            </button>
-          </div>
-        </div>
-      </section>
-    );
-  }
-
-  const isSlides = activeSchema.layout === "slides";
-  const currentField = activeSchema.fields[activeStep];
-  const progressPercentage = ((activeStep + 1) / activeSchema.fields.length) * 100;
-
-  function nextStep() {
-    if (activeStep < activeSchema.fields.length - 1) setActiveStep(s => s + 1);
-  }
-
-  function prevStep() {
-    if (activeStep > 0) setActiveStep(s => s - 1);
+    return <PublicFormSuccess receipt={receipt} formId={activeForm.id} navigate={navigate} />;
   }
 
   return (
-    <section className="public-wrap">
-      <div className="public-header">
-        <p className="eyebrow">Walrus feedback form</p>
-        <h1>{activeSchema.title}</h1>
-        <p>{activeSchema.description}</p>
-        <div className="proof-strip">
-          <span>{activeForm.schemaBlob.storage === "walrus" ? "Walrus testnet schema" : "Local fallback schema"}</span>
-          <code>{activeForm.schemaBlob.id}</code>
-          <span>Sui testnet</span>
-          {activeSchema.encrypted ? <span><Lock size={14} /> Private mode</span> : null}
+    <div className="public-form-page">
+      <div className="public-form-progress">
+        <div className="public-form-progress-track">
+          <motion.div
+            className="public-form-progress-fill"
+            initial={{ width: 0 }}
+            animate={{ width: `${requiredCount > 0 ? (requiredAnswered / requiredCount) * 100 : 0}%` }}
+            transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
+          />
         </div>
       </div>
 
-      <div className="public-form">
-        {isSlides ? (
-          <div className="slides-layout">
-            <div className="slides-progress">
-              <div className="slides-progress-bar" style={{ width: `${progressPercentage}%` }} />
-            </div>
-            
-            {currentField ? (
-              <ResponseField
-                key={currentField.id}
-                field={currentField}
-                value={values[currentField.id]}
-                file={files[currentField.id]}
-                error={errors[currentField.id]}
-                onValue={(value) => setValues((current) => ({ ...current, [currentField.id]: value }))}
-                onFile={(file) => setFiles((current) => ({ ...current, [currentField.id]: file }))}
-                onClearFile={() =>
-                  setFiles((current) => {
-                    const next = { ...current };
-                    delete next[currentField.id];
-                    return next;
-                  })
-                }
-              />
-            ) : null}
+      <header className="public-form-header">
+        <h1>{activeSchema.title}</h1>
+        {activeSchema.description ? <p>{activeSchema.description}</p> : null}
+      </header>
 
-            <div className="slides-controls">
-              <button 
-                className="secondary" 
-                onClick={prevStep} 
-                disabled={activeStep === 0 || busy}
+      <main className="public-form-body">
+        {isSlides ? (
+          <div className="slides-container">
+            <div className="slides-meta">
+              <span className="slides-counter">{activeStep + 1} <span>/ {totalFields}</span></span>
+            </div>
+
+            <AnimatePresence mode="wait" custom={direction}>
+              <motion.div
+                key={activeStep}
+                custom={direction}
+                initial={{ y: direction > 0 ? 60 : -60, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: direction > 0 ? -60 : 60, opacity: 0 }}
+                transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
+                className="slides-question-wrapper"
               >
-                <ArrowLeft size={16} /> Previous
+                <ResponseField
+                  field={currentField}
+                  value={values[currentField.id]}
+                  file={files[currentField.id]}
+                  error={errors[currentField.id]}
+                  onValue={(value) => setValues((current) => ({ ...current, [currentField.id]: value }))}
+                  onFile={(file) => setFiles((current) => ({ ...current, [currentField.id]: file }))}
+                  onClearFile={() =>
+                    setFiles((current) => {
+                      const next = { ...current };
+                      delete next[currentField.id];
+                      return next;
+                    })
+                  }
+                  index={activeStep}
+                />
+              </motion.div>
+            </AnimatePresence>
+
+            <div className="slides-nav">
+              <button className="secondary" onClick={handlePrev} disabled={activeStep === 0 || busy}>
+                <ArrowLeft size={16} /> Back
               </button>
-              
-              {activeStep === activeSchema.fields.length - 1 ? (
-                <button className="submit-bar" style={{ width: "auto" }} onClick={submit} disabled={busy}>
-                  <Send size={17} />
-                  {busy ? "Uploading to Walrus" : "Submit feedback"}
+              {activeStep === totalFields - 1 ? (
+                <button className="primary" onClick={handleSubmit} disabled={busy}>
+                  {busy ? <Loader2 size={16} className="spin" /> : <Send size={16} />}
+                  Submit
                 </button>
               ) : (
-                <button className="primary" onClick={nextStep} disabled={busy}>
+                <button className="primary" onClick={handleNext}>
                   Next <ArrowRight size={16} />
                 </button>
               )}
             </div>
           </div>
         ) : (
-          <>
-            {activeSchema.fields.map((field) => (
-              <ResponseField
-                key={field.id}
-                field={field}
-                value={values[field.id]}
-                file={files[field.id]}
-                error={errors[field.id]}
-                onValue={(value) => setValues((current) => ({ ...current, [field.id]: value }))}
-                onFile={(file) => setFiles((current) => ({ ...current, [field.id]: file }))}
-                onClearFile={() =>
-                  setFiles((current) => {
-                    const next = { ...current };
-                    delete next[field.id];
-                    return next;
-                  })
-                }
-              />
+          <div className="list-container">
+            {activeSchema.fields.map((field, index) => (
+              <div key={field.id} id={`q-${field.id}`} className="question-card">
+                <span className="question-number">{index + 1}</span>
+                <ResponseField
+                  field={field}
+                  value={values[field.id]}
+                  file={files[field.id]}
+                  error={errors[field.id]}
+                  onValue={(value) => setValues((current) => ({ ...current, [field.id]: value }))}
+                  onFile={(file) => setFiles((current) => ({ ...current, [field.id]: file }))}
+                  onClearFile={() =>
+                    setFiles((current) => {
+                      const next = { ...current };
+                      delete next[field.id];
+                      return next;
+                    })
+                  }
+                  index={index}
+                />
+              </div>
             ))}
-            <button className="submit-bar" onClick={submit} disabled={busy}>
-              <Send size={17} />
-              {busy ? "Uploading to Walrus" : "Submit feedback"}
+            <button className="public-submit-btn" onClick={handleSubmit} disabled={busy}>
+              {busy ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
+              {busy ? "Submitting..." : "Submit"}
             </button>
-          </>
+          </div>
         )}
-      </div>
+      </main>
+
+      <footer className="public-form-footer">
+        <button className="proof-badge" onClick={() => setShowProofs(!showProofs)}>
+          <Lock size={12} />
+          Verified on Walrus
+          <ChevronDown size={12} style={{ transform: showProofs ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
+        </button>
+        <AnimatePresence>
+          {showProofs && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="proof-details"
+            >
+              <div className="proof-details-inner">
+                <div className="proof-row"><span>Schema blob</span><code>{activeForm.schemaBlob.id}</code></div>
+                {activeForm.txDigest && (
+                  <div className="proof-row">
+                    <span>Sui transaction</span>
+                    <a className="proof-link" href={testnetTxUrl(activeForm.txDigest)} target="_blank" rel="noreferrer">{activeForm.txDigest}</a>
+                  </div>
+                )}
+                <div className="proof-row"><span>Storage</span><span>{activeForm.schemaBlob.storage === "walrus" ? "Walrus Testnet" : "Local fallback"}</span></div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </footer>
+    </div>
+  );
+}
+
+function PublicFormSuccess({ receipt, formId, navigate }: { receipt: Submission; formId: string; navigate: (path: string) => void }) {
+  const [showDetails, setShowDetails] = useState(false);
+  return (
+    <section className="public-success-page">
+      <motion.div
+        initial={{ scale: 0.85, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ type: "spring", damping: 22, stiffness: 300 }}
+        className="public-success-card"
+      >
+        <motion.div className="public-success-icon" initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.15, type: "spring", damping: 15, stiffness: 400 }}>
+          <Check size={48} strokeWidth={3} />
+        </motion.div>
+        <h1>Thank you!</h1>
+        <p>Your response has been recorded and verified on the Walrus network.</p>
+        <div className="public-success-actions">
+          <button className="primary" onClick={() => window.location.reload()}>
+            <Plus size={16} /> Submit another response
+          </button>
+          <button className="secondary" onClick={() => navigate(`/admin/${formId}`)}>
+            <BarChart3 size={16} /> View responses
+          </button>
+        </div>
+        <button className="public-success-toggle" onClick={() => setShowDetails(!showDetails)}>
+          {showDetails ? "Hide" : "Show"} verification details
+          <ChevronDown size={14} style={{ transform: showDetails ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
+        </button>
+        <AnimatePresence>
+          {showDetails && (
+            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} className="public-success-details">
+              <dl>
+                <dt>Submission blob</dt>
+                <dd>{receipt.submissionBlob.id}</dd>
+                <dt>Sui transaction</dt>
+                <dd><a className="proof-link" href={testnetTxUrl(receipt.txDigest)} target="_blank" rel="noreferrer">{receipt.txDigest}</a></dd>
+                <dt>Storage</dt>
+                <dd>{receipt.submissionBlob.storage === "walrus" ? "Walrus Testnet" : "Local fallback"}</dd>
+              </dl>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
     </section>
   );
 }
@@ -1320,6 +1491,7 @@ function ResponseField({
   onValue,
   onFile,
   onClearFile,
+  index,
 }: {
   field: Field;
   value: string | string[] | number | undefined;
@@ -1328,76 +1500,145 @@ function ResponseField({
   onValue: (value: string | string[] | number) => void;
   onFile: (file: File) => void;
   onClearFile: () => void;
+  index?: number;
 }) {
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [hoverRating, setHoverRating] = useState(0);
+  const [isFileDragging, setIsFileDragging] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setDropdownOpen(false);
+    }
+    if (dropdownOpen) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [dropdownOpen]);
+
+  function formatFileSize(bytes: number) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function handleFileDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsFileDragging(false);
+    const dropped = e.dataTransfer.files[0];
+    if (dropped) onFile(dropped);
+  }
+
   return (
     <div className={`response-field ${error ? "has-error" : ""}`}>
-      <span className="question-label">
-        {field.label}
-        {field.required ? <em>Required</em> : null}
-      </span>
-      {field.helper ? <small>{field.helper}</small> : null}
-      {field.type === "shortText" ? <input value={String(value ?? "")} onChange={(event) => onValue(event.target.value)} /> : null}
-      {field.type === "richText" ? <textarea value={String(value ?? "")} onChange={(event) => onValue(event.target.value)} /> : null}
-      {field.type === "url" ? <input type="url" value={String(value ?? "")} onChange={(event) => onValue(event.target.value)} /> : null}
-      {field.type === "dropdown" ? (
-        <select value={String(value ?? "")} onChange={(event) => onValue(event.target.value)}>
-          <option value="">Select one</option>
-          {field.options?.map((option) => <option key={option}>{option}</option>)}
-        </select>
-      ) : null}
-      {field.type === "checkboxes" ? (
-        <div className="check-grid">
+      <div className="response-field-header">
+        <label className="response-field-label">{field.label || "Untitled Question"}{field.required ? <span className="response-required">*</span> : null}</label>
+        {field.required ? <span className="response-required-pill">Required</span> : null}
+      </div>
+      {field.helper ? <p className="response-field-helper">{field.helper}</p> : null}
+
+      {field.type === "shortText" && (
+        <input className="response-input" type="text" value={String(value ?? "")} onChange={(e) => onValue(e.target.value)} placeholder="Your answer" />
+      )}
+
+      {field.type === "richText" && (
+        <AutoResizeTextarea value={String(value ?? "")} onChange={(v) => onValue(v)} placeholder="Your answer" />
+      )}
+
+      {field.type === "url" && (
+        <input className="response-input" type="url" value={String(value ?? "")} onChange={(e) => onValue(e.target.value)} placeholder="https://" />
+      )}
+
+      {field.type === "dropdown" && (
+        <div className="response-dropdown" ref={dropdownRef}>
+          <button className={`response-dropdown-trigger ${!value ? "placeholder" : ""}`} onClick={() => setDropdownOpen(!dropdownOpen)}>
+            {String(value || "Select an option")}
+            <ChevronDown size={16} style={{ transform: dropdownOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s", marginLeft: "auto" }} />
+          </button>
+          <AnimatePresence>
+            {dropdownOpen && (
+              <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.15 }} className="response-dropdown-menu">
+                {field.options?.map((option) => (
+                  <button key={option} className={value === option ? "active" : ""} onClick={() => { onValue(option); setDropdownOpen(false); }}>
+                    {option}
+                  </button>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
+
+      {field.type === "checkboxes" && (
+        <div className="response-checkboxes">
           {field.options?.map((option) => {
             const checked = Array.isArray(value) && value.includes(option);
             return (
-              <label key={option} className={checked ? "checked" : ""}>
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={(event) => {
-                    const current = Array.isArray(value) ? value : [];
-                    onValue(event.target.checked ? [...current, option] : current.filter((item) => item !== option));
-                  }}
-                />
-                {option}
+              <label key={option} className={`response-checkbox ${checked ? "checked" : ""}`}>
+                <input type="checkbox" checked={checked} onChange={(e) => {
+                  const current = Array.isArray(value) ? value : [];
+                  onValue(e.target.checked ? [...current, option] : current.filter((item) => item !== option));
+                }} />
+                <span className="response-checkbox-box">{checked && <Check size={14} strokeWidth={3} />}</span>
+                <span className="response-checkbox-label">{option}</span>
               </label>
             );
           })}
         </div>
-      ) : null}
-      {field.type === "rating" ? (
-        <div className="rating-input">
-          {[1, 2, 3, 4, 5].map((star) => (
-            <button type="button" key={star} onClick={() => onValue(star)} className={Number(value ?? 0) >= star ? "active" : ""}>
-              <Star size={23} />
-            </button>
-          ))}
-        </div>
-      ) : null}
-      {field.type === "image" || field.type === "video" ? (
-        <span className="file-control">
-          <input type="file" accept={field.type === "image" ? "image/*" : "video/*"} onChange={(event) => event.target.files?.[0] && onFile(event.target.files[0])} />
-          {file ? (
-            <span className="file-pill">
-              <FileCheck2 size={15} />
-              <span>{file.name}</span>
-              <small>{formatBytes(file.size)}</small>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.preventDefault();
-                  onClearFile();
-                }}
-                aria-label="Clear selected file"
-              >
-                <X size={14} />
+      )}
+
+      {field.type === "rating" && (
+        <div className="response-rating">
+          {[1, 2, 3, 4, 5].map((star) => {
+            const isActive = (hoverRating || Number(value || 0)) >= star;
+            return (
+              <button key={star} type="button" onClick={() => onValue(star)} onMouseEnter={() => setHoverRating(star)} onMouseLeave={() => setHoverRating(0)} className={isActive ? "active" : ""}>
+                <Star size={32} fill={isActive ? "currentColor" : "none"} strokeWidth={1.5} />
               </button>
-            </span>
-          ) : null}
-        </span>
-      ) : null}
-      {error ? <strong className="error">{error}</strong> : null}
+            );
+          })}
+        </div>
+      )}
+
+      {(field.type === "image" || field.type === "video") && (
+        <div className="response-file">
+          {!file ? (
+            <div className={`file-drop-zone ${isFileDragging ? "dragging" : ""}`} onDragOver={(e) => { e.preventDefault(); setIsFileDragging(true); }} onDragLeave={() => setIsFileDragging(false)} onDrop={handleFileDrop} onClick={() => fileInputRef.current?.click()}>
+              <input ref={fileInputRef} type="file" accept={field.type === "image" ? "image/*" : "video/*"} style={{ display: "none" }} onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+              <Upload size={24} />
+              <span>Click or drop {field.type === "image" ? "image" : "video"} here</span>
+            </div>
+          ) : (
+            <div className="file-pill">
+              {field.type === "image" ? <Image size={16} /> : <FileVideo size={16} />}
+              <span>{file.name}</span>
+              <small>{formatFileSize(file.size)}</small>
+              <button type="button" onClick={(e) => { e.preventDefault(); onClearFile(); }} aria-label="Clear selected file"><X size={14} /></button>
+            </div>
+          )}
+        </div>
+      )}
+
+      <AnimatePresence>
+        {error && (
+          <motion.div initial={{ opacity: 0, height: 0, y: -4 }} animate={{ opacity: 1, height: "auto", y: 0 }} exit={{ opacity: 0, height: 0, y: -4 }} transition={{ duration: 0.2 }} className="response-error">
+            <AlertCircle size={14} />
+            {error}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+function AutoResizeTextarea({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; }
+  }, [value]);
+  return (
+    <textarea ref={ref} className="response-textarea" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={1} />
   );
 }
 
@@ -1408,6 +1649,19 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
   const [status, setStatus] = useState("all");
   const [priority, setPriority] = useState("all");
   const [viewType, setViewType] = useState<"grid" | "table">("table");
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [priorityOpen, setPriorityOpen] = useState(false);
+  const statusRef = useRef<HTMLDivElement>(null);
+  const priorityRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (statusRef.current && !statusRef.current.contains(e.target as Node)) setStatusOpen(false);
+      if (priorityRef.current && !priorityRef.current.contains(e.target as Node)) setPriorityOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
 
   const filtered = useMemo(() => {
     return submissions.filter((submission) => {
@@ -1419,16 +1673,26 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
       );
     });
   }, [priority, query, status, submissions]);
+
   const activeFilterCount = Number(Boolean(query.trim())) + Number(status !== "all") + Number(priority !== "all");
+
+  const stats = useMemo(() => {
+    const total = submissions.length;
+    const newCount = submissions.filter((s) => s.status === "new").length;
+    const reviewed = submissions.filter((s) => s.status === "reviewed" || s.status === "prioritized").length;
+    const withMedia = submissions.filter((s) => Object.keys(s.media).length > 0).length;
+    return { total, newCount, reviewed, withMedia };
+  }, [submissions]);
 
   if (!form) {
     return (
       <section className="center-state">
-        <h1>No form object found</h1>
-        <button className="primary" onClick={() => navigate("/builder")}>Back to builder</button>
+        <h1>No form found</h1>
+        <button className="primary" onClick={() => navigate("/")}>Back to workspace</button>
       </section>
     );
   }
+
   const activeForm = form;
   const adminSchema = activeForm.schema ?? activeForm.draftSchema;
 
@@ -1451,24 +1715,13 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
   function exportCsv() {
     const fields = adminSchema.fields;
     const headers = [
-      "submission_id",
-      "created_at",
-      "status",
-      "priority",
-      "submitter",
-      "submission_blob",
-      "tx_digest",
+      "submission_id", "created_at", "status", "priority", "submitter", "submission_blob", "tx_digest",
       ...fields.map((field) => field.label),
     ];
     const rows = filtered.map((submission) =>
       [
-        submission.id,
-        submission.createdAt,
-        submission.status,
-        submission.priority,
-        submission.submitter,
-        submission.submissionBlob.id,
-        submission.txDigest,
+        submission.id, submission.createdAt, submission.status, submission.priority,
+        submission.submitter, submission.submissionBlob.id, submission.txDigest,
         ...fields.map((field) => formatValue(submission.values[field.id])),
       ].map(csvCell),
     );
@@ -1479,93 +1732,138 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
     anchor.download = `${adminSchema.title.replace(/\W+/g, "-").toLowerCase()}-submissions.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
+    toast.success("CSV exported");
   }
 
   return (
     <section className="dashboard">
       <div className="dashboard-header">
-        <div>
-          <p className="eyebrow">Admin dashboard</p>
+        <button className="back-btn" onClick={() => navigate("/")} aria-label="Back">
+          <ArrowLeft size={18} />
+        </button>
+        <div className="dashboard-title-group">
           <h1>{adminSchema.title}</h1>
-          <p className="muted">
-            {submissions.length} submissions indexed for this form object.
-            {activeFilterCount ? ` ${activeFilterCount} filter${activeFilterCount === 1 ? "" : "s"} active.` : ""}
-          </p>
+          <p className="muted">{submissions.length} submission{submissions.length === 1 ? "" : "s"} &middot; {adminSchema.fields.length} question{adminSchema.fields.length === 1 ? "" : "s"}</p>
         </div>
-        <div className="header-actions">
-          <button onClick={() => navigate(`/f/${activeForm.id}`)}>
-            <ExternalLink size={16} />
-            Public form
+        <div className="dashboard-header-actions">
+          <button className="secondary" onClick={() => navigate(`/f/${activeForm.id}`)}>
+            <ExternalLink size={15} /> Public form
           </button>
           <button className="primary" onClick={exportCsv}>
-            <Download size={16} />
-            Export CSV
+            <Download size={15} /> Export CSV
           </button>
         </div>
       </div>
 
-      <div className="filters">
-        <input placeholder="Search responses" value={query} onChange={(event) => setQuery(event.target.value)} />
-        <select value={status} onChange={(event) => setStatus(event.target.value)}>
-          <option value="all">All statuses</option>
-          <option value="new">New</option>
-          <option value="reviewed">Reviewed</option>
-          <option value="prioritized">Prioritized</option>
-          <option value="archived">Archived</option>
-        </select>
-        <select value={priority} onChange={(event) => setPriority(event.target.value)}>
-          <option value="all">All priorities</option>
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-        </select>
-        {activeFilterCount ? (
-          <button
-            className="secondary"
-            onClick={() => {
-              setQuery("");
-              setStatus("all");
-              setPriority("all");
-            }}
-          >
-            <X size={15} />
-            Clear filters
-          </button>
-        ) : null}
-        
+      <div className="dashboard-stats">
+        <div className="dashboard-stat">
+          <div className="dashboard-stat-icon"><Inbox size={18} /></div>
+          <div>
+            <div className="dashboard-stat-value">{stats.total}</div>
+            <div className="dashboard-stat-label">Total</div>
+          </div>
+        </div>
+        <div className="dashboard-stat">
+          <div className="dashboard-stat-icon new"><Sparkles size={18} /></div>
+          <div>
+            <div className="dashboard-stat-value">{stats.newCount}</div>
+            <div className="dashboard-stat-label">New</div>
+          </div>
+        </div>
+        <div className="dashboard-stat">
+          <div className="dashboard-stat-icon reviewed"><Check size={18} /></div>
+          <div>
+            <div className="dashboard-stat-value">{stats.reviewed}</div>
+            <div className="dashboard-stat-label">Reviewed</div>
+          </div>
+        </div>
+        <div className="dashboard-stat">
+          <div className="dashboard-stat-icon media"><Image size={18} /></div>
+          <div>
+            <div className="dashboard-stat-value">{stats.withMedia}</div>
+            <div className="dashboard-stat-label">With media</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="dashboard-toolbar">
+        <div className="search-box">
+          <Search size={16} />
+          <input placeholder="Search responses..." value={query} onChange={(e) => setQuery(e.target.value)} />
+          {query && <button className="search-clear" onClick={() => setQuery("")}><X size={14} /></button>}
+        </div>
+
+        <div className="dashboard-filters">
+          <div className="filter-dropdown" ref={statusRef}>
+            <button className="filter-dropdown-trigger" onClick={() => setStatusOpen(!statusOpen)}>
+              <Filter size={14} /> Status: <strong>{status === "all" ? "All" : status}</strong>
+              <ChevronDown size={14} style={{ marginLeft: "auto", transform: statusOpen ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s" }} />
+            </button>
+            <AnimatePresence>
+              {statusOpen && (
+                <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.15 }} className="filter-dropdown-menu">
+                  {["all", "new", "reviewed", "prioritized", "archived"].map((s) => (
+                    <button key={s} className={status === s ? "active" : ""} onClick={() => { setStatus(s); setStatusOpen(false); }}>
+                      {s === "all" ? "All statuses" : s.charAt(0).toUpperCase() + s.slice(1)}
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          <div className="filter-dropdown" ref={priorityRef}>
+            <button className="filter-dropdown-trigger" onClick={() => setPriorityOpen(!priorityOpen)}>
+              <TrendingUp size={14} /> Priority: <strong>{priority === "all" ? "All" : priority}</strong>
+              <ChevronDown size={14} style={{ marginLeft: "auto", transform: priorityOpen ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s" }} />
+            </button>
+            <AnimatePresence>
+              {priorityOpen && (
+                <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.15 }} className="filter-dropdown-menu">
+                  {["all", "low", "medium", "high"].map((p) => (
+                    <button key={p} className={priority === p ? "active" : ""} onClick={() => { setPriority(p); setPriorityOpen(false); }}>
+                      {p === "all" ? "All priorities" : p.charAt(0).toUpperCase() + p.slice(1)}
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {activeFilterCount > 0 && (
+            <button className="filter-clear" onClick={() => { setQuery(""); setStatus("all"); setPriority("all"); }}>
+              <X size={14} /> Clear
+            </button>
+          )}
+        </div>
+
         <div className="view-toggle">
-          <button 
-            className={viewType === "table" ? "active" : ""} 
-            onClick={() => setViewType("table")}
-            aria-label="Table View"
-          >
+          <button className={viewType === "table" ? "active" : ""} onClick={() => setViewType("table")} aria-label="Table view">
             <Columns3 size={16} />
           </button>
-          <button 
-            className={viewType === "grid" ? "active" : ""} 
-            onClick={() => setViewType("grid")}
-            aria-label="Grid View"
-          >
+          <button className={viewType === "grid" ? "active" : ""} onClick={() => setViewType("grid")} aria-label="Grid view">
             <LayoutList size={16} />
           </button>
         </div>
       </div>
 
       {!submissions.length ? (
-        <div className="empty-card">
-          <MessageSquareText size={22} />
-          <strong>No submissions yet</strong>
-          <span>Open the public form and send one real test response for the hackathon submission.</span>
+        <div className="empty-state">
+          <div className="empty-state-icon"><MessageSquareText size={32} /></div>
+          <h2>No submissions yet</h2>
+          <p>Open the public form and send a test response.</p>
           <button className="primary" onClick={() => navigate(`/f/${activeForm.id}`)}>
-            <ExternalLink size={16} />
-            Open public form
+            <ExternalLink size={16} /> Open public form
           </button>
         </div>
       ) : submissions.length > 0 && !filtered.length ? (
-        <div className="empty-card">
-          <AlertCircle size={22} />
-          <strong>No matching submissions</strong>
-          <span>Clear filters or adjust the search query.</span>
+        <div className="empty-state">
+          <div className="empty-state-icon"><AlertCircle size={32} /></div>
+          <h2>No matching submissions</h2>
+          <p>Clear filters or adjust your search query.</p>
+          <button className="secondary" onClick={() => { setQuery(""); setStatus("all"); setPriority("all"); }}>
+            <X size={16} /> Clear filters
+          </button>
         </div>
       ) : viewType === "table" ? (
         <div className="submission-table-container">
@@ -1575,9 +1873,10 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
                 <th>Date</th>
                 <th>Status</th>
                 <th>Priority</th>
-                {adminSchema.fields.map((field) => (
+                {adminSchema.fields.slice(0, 4).map((field) => (
                   <th key={field.id}>{field.label}</th>
                 ))}
+                {adminSchema.fields.length > 4 && <th>...</th>}
                 <th>Media</th>
               </tr>
             </thead>
@@ -1585,40 +1884,29 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
               {filtered.map((submission) => (
                 <tr key={submission.id}>
                   <td>
-                    <div>{new Date(submission.createdAt).toLocaleDateString()}</div>
-                    <code style={{ fontSize: 10 }}>{submission.submissionBlob.id.slice(0, 12)}...</code>
+                    <div className="cell-date">{new Date(submission.createdAt).toLocaleDateString()}</div>
+                    <div className="cell-time">{new Date(submission.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
                   </td>
                   <td>
-                    <select className="secondary" value={submission.status} onChange={(event) => patchSubmission(submission, { status: event.target.value as Submission["status"] })}>
-                      <option value="new">New</option>
-                      <option value="reviewed">Reviewed</option>
-                      <option value="prioritized">Prioritized</option>
-                      <option value="archived">Archived</option>
-                    </select>
+                    <StatusBadge value={submission.status} onChange={(v) => patchSubmission(submission, { status: v as Submission["status"] })} />
                   </td>
                   <td>
-                    <select className="secondary" value={submission.priority} onChange={(event) => patchSubmission(submission, { priority: event.target.value as Submission["priority"] })}>
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                    </select>
+                    <PriorityBadge value={submission.priority} onChange={(v) => patchSubmission(submission, { priority: v as Submission["priority"] })} />
                   </td>
-                  {adminSchema.fields.map((field) => (
+                  {adminSchema.fields.slice(0, 4).map((field) => (
                     <td key={field.id}>
-                      {formatValue(submission.values[field.id]) || "-"}
+                      <span className="cell-value" title={formatValue(submission.values[field.id])}>
+                        {formatValue(submission.values[field.id]) || "-"}
+                      </span>
                     </td>
                   ))}
+                  {adminSchema.fields.length > 4 && <td className="cell-muted">+{adminSchema.fields.length - 4}</td>}
                   <td>
-                    {Object.values(submission.media).length ? (
-                      <div className="media-row">
-                        {Object.values(submission.media).map((blob) => (
-                          <a href={blob.url} target="_blank" rel="noreferrer" key={blob.id}>
-                            {blob.contentType?.startsWith("image") ? <Image size={14} /> : <FileVideo size={14} />}
-                            {blob.name?.slice(0, 8) || blob.id.slice(0, 8)}...
-                          </a>
-                        ))}
-                      </div>
-                    ) : "-"}
+                    {Object.values(submission.media).length > 0 ? (
+                      <span className="media-badge">{Object.values(submission.media).length} file{Object.values(submission.media).length === 1 ? "" : "s"}</span>
+                    ) : (
+                      <span className="cell-muted">-</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -1629,49 +1917,108 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
         <div className="submission-grid">
           {filtered.map((submission) => (
             <article className="submission-card" key={submission.id}>
-              <div className="submission-top">
-                <div>
-                  <strong>{new Date(submission.createdAt).toLocaleString()}</strong>
-                  <code>{submission.submissionBlob.id}</code>
+              <div className="submission-card-header">
+                <div className="submission-card-date">
+                  <Calendar size={14} />
+                  {new Date(submission.createdAt).toLocaleString()}
                 </div>
-                <span className={`priority ${submission.priority}`}>{submission.priority}</span>
+                <div className="submission-card-badges">
+                  <StatusBadge value={submission.status} onChange={(v) => patchSubmission(submission, { status: v as Submission["status"] })} />
+                  <PriorityBadge value={submission.priority} onChange={(v) => patchSubmission(submission, { priority: v as Submission["priority"] })} />
+                </div>
               </div>
-              <div className="answer-list">
+              <div className="submission-card-body">
                 {adminSchema.fields.map((field) => (
-                  <div key={field.id}>
-                    <span>{field.label}</span>
-                    <strong>{formatValue(submission.values[field.id]) || "-"}</strong>
+                  <div key={field.id} className="submission-answer">
+                    <span className="submission-answer-label">{field.label}</span>
+                    <span className="submission-answer-value">{formatValue(submission.values[field.id]) || "-"}</span>
                   </div>
                 ))}
               </div>
-              {Object.values(submission.media).length ? (
-                <div className="media-row">
+              {Object.values(submission.media).length > 0 && (
+                <div className="submission-card-media">
                   {Object.values(submission.media).map((blob) => (
                     <a href={blob.url} target="_blank" rel="noreferrer" key={blob.id}>
-                      {blob.contentType?.startsWith("image") ? <Image size={16} /> : <FileVideo size={16} />}
-                      {blob.name || blob.id}
+                      {blob.contentType?.startsWith("image") ? <Image size={14} /> : <FileVideo size={14} />}
+                      {blob.name || blob.id.slice(0, 10)}...
                     </a>
                   ))}
                 </div>
-              ) : null}
-              <div className="review-actions">
-                <select value={submission.status} onChange={(event) => patchSubmission(submission, { status: event.target.value as Submission["status"] })}>
-                  <option value="new">New</option>
-                  <option value="reviewed">Reviewed</option>
-                  <option value="prioritized">Prioritized</option>
-                  <option value="archived">Archived</option>
-                </select>
-                <select value={submission.priority} onChange={(event) => patchSubmission(submission, { priority: event.target.value as Submission["priority"] })}>
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </select>
-              </div>
+              )}
             </article>
           ))}
         </div>
       )}
     </section>
+  );
+}
+
+function StatusBadge({ value, onChange }: { value: Submission["status"]; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function handleClick(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
+    if (open) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+  const config: Record<string, { label: string; class: string }> = {
+    new: { label: "New", class: "status-new" },
+    reviewed: { label: "Reviewed", class: "status-reviewed" },
+    prioritized: { label: "Prioritized", class: "status-prioritized" },
+    archived: { label: "Archived", class: "status-archived" },
+  };
+  const current = config[value] ?? config.new;
+  return (
+    <div className="badge-dropdown" ref={ref}>
+      <button className={`badge ${current.class}`} onClick={() => setOpen(!open)}>
+        {current.label} <ChevronDown size={12} />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.15 }} className="badge-dropdown-menu">
+            {Object.entries(config).map(([key, cfg]) => (
+              <button key={key} className={value === key ? "active" : ""} onClick={() => { onChange(key); setOpen(false); }}>
+                <span className={`dot ${cfg.class}`} /> {cfg.label}
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function PriorityBadge({ value, onChange }: { value: Submission["priority"]; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function handleClick(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
+    if (open) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+  const config: Record<string, { label: string; class: string }> = {
+    low: { label: "Low", class: "priority-low" },
+    medium: { label: "Medium", class: "priority-medium" },
+    high: { label: "High", class: "priority-high" },
+  };
+  const current = config[value] ?? config.medium;
+  return (
+    <div className="badge-dropdown" ref={ref}>
+      <button className={`badge ${current.class}`} onClick={() => setOpen(!open)}>
+        {current.label} <ChevronDown size={12} />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.15 }} className="badge-dropdown-menu">
+            {Object.entries(config).map(([key, cfg]) => (
+              <button key={key} className={value === key ? "active" : ""} onClick={() => { onChange(key); setOpen(false); }}>
+                <span className={`dot ${cfg.class}`} /> {cfg.label}
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
