@@ -308,6 +308,7 @@ function App() {
   const formMatch = path.match(/^\/f\/([^/]+)/);
   const adminMatch = path.match(/^\/admin\/([^/]+)/);
   const builderMatch = path.match(/^\/builder(?:\/([^/]+))?$/);
+  const isWorkspace = path === "/forms";
 
   const isPublicForm = Boolean(formMatch);
 
@@ -321,8 +322,10 @@ function App() {
           <Dashboard formId={adminMatch[1]} navigate={navigate} />
         ) : builderMatch ? (
           <Builder formId={builderMatch[1]} navigate={navigate} />
-        ) : (
+        ) : isWorkspace ? (
           <FormsHome navigate={navigate} />
+        ) : (
+          <LandingPage navigate={navigate} />
         )}
       </main>
     </AppProvider>
@@ -396,7 +399,7 @@ function TopBar({ navigate }: { navigate: (path: string) => void }) {
 
   return (
     <header className="topbar">
-      <button className="brand" onClick={() => navigate("/forms")} aria-label="TuskD home">
+      <button className="brand" onClick={() => navigate("/")} aria-label="TuskD home">
         <span className="brand-mark">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 2L2 7l10 5 10-5-10-5z" />
@@ -410,12 +413,265 @@ function TopBar({ navigate }: { navigate: (path: string) => void }) {
         </span>
       </button>
       <div className="topbar-actions">
+        <button className="topbar-link" onClick={() => navigate("/forms")}>
+          <Table2 size={14} />
+          Workspace
+        </button>
         <WalletPill />
         <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme">
           {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
         </button>
       </div>
     </header>
+  );
+}
+
+function LandingPage({ navigate }: { navigate: (path: string) => void }) {
+  const account = useCurrentAccount();
+
+  return (
+    <div className="landing-page">
+      <section className="landing-hero">
+        <motion.div
+          className="landing-hero-copy"
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+        >
+          <p className="landing-kicker">
+            <Wallet size={14} />
+            Sui Testnet + Walrus Testnet
+          </p>
+          <h1>TuskD</h1>
+          <p className="landing-lede">
+            Verifiable intake for teams collecting applications, bug reports, grants, and review evidence that should not disappear into a spreadsheet.
+          </p>
+          <div className="landing-actions">
+            <button className="primary landing-primary" onClick={() => navigate("/forms")}>
+              {account ? "Open workspace" : "Launch workspace"}
+              <ArrowRight size={16} />
+            </button>
+            <button className="secondary landing-secondary" onClick={() => document.getElementById("landing-workflow")?.scrollIntoView({ behavior: "smooth" })}>
+              <ArrowDown size={16} />
+              See workflow
+            </button>
+          </div>
+          <div className="landing-proof-row" aria-label="Platform guarantees">
+            <span><Lock size={13} /> Signed actions</span>
+            <span><Upload size={13} /> Stored evidence</span>
+            <span><FileCheck2 size={13} /> Review trail</span>
+          </div>
+        </motion.div>
+
+        <motion.div
+          className="landing-product-shot"
+          initial={{ opacity: 0, y: 22 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.08 }}
+          aria-label="TuskD product preview"
+        >
+          <div className="landing-window">
+            <div className="landing-window-top">
+              <span />
+              <span />
+              <span />
+              <strong>Feedback intake</strong>
+            </div>
+            <div className="landing-workbench">
+              <div className="landing-field-rail" aria-label="Builder field palette">
+                <button><MessageSquareText size={14} /> Evidence</button>
+                <button><Settings2 size={14} /> Category</button>
+                <button><Star size={14} /> Score</button>
+                <button><Image size={14} /> Media</button>
+              </div>
+              <div className="landing-form-preview">
+                <div className="landing-preview-tabs">
+                  <span className="active">Build</span>
+                  <span>Submit</span>
+                  <span>Review</span>
+                </div>
+                <div className="landing-form-title">
+                  <span>01</span>
+                  <strong>What should the review team investigate first?</strong>
+                </div>
+                <div className="landing-input-line" />
+                <div className="landing-form-title compact">
+                  <span>02</span>
+                  <strong>Attach supporting evidence</strong>
+                </div>
+                <div className="landing-upload-preview">
+                  <Upload size={18} />
+                  <span>Screenshot, video, or report file</span>
+                </div>
+                <div className="landing-review-list" aria-label="Response review preview">
+                  <div>
+                    <span className="landing-review-dot high" />
+                    <strong>Wallet mismatch report</strong>
+                    <small>High priority</small>
+                  </div>
+                  <div>
+                    <span className="landing-review-dot" />
+                    <strong>Grant milestone evidence</strong>
+                    <small>Reviewed</small>
+                  </div>
+                </div>
+              </div>
+              <div className="landing-proof-panel">
+                <div>
+                  <span>Schema blob</span>
+                  <code>0xwal...9c4</code>
+                </div>
+                <div>
+                  <span>Sui tx</span>
+                  <code>BFSq...4pJH</code>
+                </div>
+                <div>
+                  <span>Status update</span>
+                  <code>priority: high</code>
+                </div>
+                <div className="landing-status-pill">
+                  <Check size={13} />
+                  Verified
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="landing-admin-preview">
+            <div>
+              <span className="landing-admin-dot" />
+              <strong>Response queue</strong>
+              <small>12 new</small>
+            </div>
+            <div className="landing-admin-statuses">
+              <span>New</span>
+              <span>Reviewed</span>
+              <span>High priority</span>
+            </div>
+          </div>
+        </motion.div>
+      </section>
+
+      <section className="landing-section landing-audience-section">
+        <div className="landing-section-heading">
+          <p className="eyebrow">Designed for</p>
+          <h2>Intake flows where the response record matters.</h2>
+          <p>
+            Use TuskD when your team needs structured answers, media uploads, a reviewer queue, and proof that critical actions were signed and stored.
+          </p>
+        </div>
+        <div className="landing-use-case-grid">
+          <article>
+            <span><FileText size={16} /></span>
+            <strong>Grant and milestone reviews</strong>
+            <p>Collect proposals, proofs of work, attachments, and reviewer decisions in one queue.</p>
+          </article>
+          <article>
+            <span><AlertCircle size={16} /></span>
+            <strong>Bug and abuse reports</strong>
+            <p>Capture screenshots, videos, URLs, severity signals, and wallet-linked submitter context.</p>
+          </article>
+          <article>
+            <span><Inbox size={16} /></span>
+            <strong>Partner intake</strong>
+            <p>Route applications from public links into a searchable, prioritized response dashboard.</p>
+          </article>
+        </div>
+      </section>
+
+      <section className="landing-section landing-section-tight">
+        <div className="landing-section-heading">
+          <p className="eyebrow">Platform analysis</p>
+          <h2>Form software with a proof layer.</h2>
+          <p>
+            The platform keeps the familiar form workflow but adds signed transactions and storage receipts at publish, submit, and review checkpoints.
+          </p>
+        </div>
+        <div className="landing-feature-grid">
+          <article>
+            <LayoutTemplate size={20} />
+            <h3>Build rich forms</h3>
+            <p>Compose short text, rich text, dropdown, checkbox, rating, URL, image, and video fields with standard or slide-style layouts.</p>
+          </article>
+          <article>
+            <Lock size={20} />
+            <h3>Publish with proofs</h3>
+            <p>Form schemas, submissions, and uploaded media go to Walrus, while publish and submit actions are backed by signed Sui transactions.</p>
+          </article>
+          <article>
+            <BarChart3 size={20} />
+            <h3>Review the queue</h3>
+            <p>Admins can search, filter, prioritize, update status, inspect media, open transaction links, and export CSVs.</p>
+          </article>
+        </div>
+      </section>
+
+      <section className="landing-section landing-proof-section">
+        <div className="landing-proof-copy">
+          <p className="eyebrow">Integrity model</p>
+          <h2>Every major handoff leaves a receipt.</h2>
+          <p>
+            TuskD makes the important parts of intake auditable without turning the respondent experience into a block explorer.
+          </p>
+        </div>
+        <div className="landing-integrity-grid">
+          <article>
+            <span>01</span>
+            <strong>Publish</strong>
+            <p>Schema uploaded to Walrus; form object created through a wallet-signed Sui transaction.</p>
+          </article>
+          <article>
+            <span>02</span>
+            <strong>Submit</strong>
+            <p>Answers and media are stored, then attached to a signed submission event.</p>
+          </article>
+          <article>
+            <span>03</span>
+            <strong>Review</strong>
+            <p>Status and priority updates are written through the owner workflow, preserving reviewer intent.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="landing-workflow" className="landing-section landing-workflow-section">
+        <div className="landing-section-heading">
+          <p className="eyebrow">Workflow</p>
+          <h2>From draft to reviewed submission</h2>
+        </div>
+        <div className="landing-steps">
+          <article>
+            <span>1</span>
+            <h3>Create</h3>
+            <p>Connect a Sui wallet, create a draft, and arrange the fields your team needs.</p>
+          </article>
+          <article>
+            <span>2</span>
+            <h3>Publish</h3>
+            <p>Upload the schema to Walrus and sign the Sui create-form transaction.</p>
+          </article>
+          <article>
+            <span>3</span>
+            <h3>Collect</h3>
+            <p>Share a public link where respondents submit answers and media from their wallet.</p>
+          </article>
+          <article>
+            <span>4</span>
+            <h3>Decide</h3>
+            <p>Filter submissions, set status and priority on Sui, and export the working set.</p>
+          </article>
+        </div>
+      </section>
+
+      <section className="landing-section landing-cta">
+        <div>
+          <p className="eyebrow">Start</p>
+          <h2>Build a testnet intake flow with receipts from the first publish.</h2>
+        </div>
+        <button className="primary landing-primary" onClick={() => navigate("/forms")}>
+          Open workspace
+          <ArrowRight size={16} />
+        </button>
+      </section>
+    </div>
   );
 }
 
@@ -2049,7 +2305,7 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
     return (
       <section className="center-state">
         <h1>No form found</h1>
-        <button className="primary" onClick={() => navigate("/")}>Back to workspace</button>
+        <button className="primary" onClick={() => navigate("/forms")}>Back to workspace</button>
       </section>
     );
   }
@@ -2124,7 +2380,7 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
   return (
     <section className="dashboard">
       <div className="dashboard-header">
-        <button className="back-btn" onClick={() => navigate("/")} aria-label="Back">
+        <button className="back-btn" onClick={() => navigate("/forms")} aria-label="Back">
           <ArrowLeft size={18} />
         </button>
         <div className="dashboard-title-group">
