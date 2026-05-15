@@ -68,6 +68,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sheet } from "./components/Sheet";
 import { AddFieldModal } from "./components/AddFieldModal";
+import { DropdownPortal } from "./components/DropdownPortal";
 import type { BlobReceipt, Field, FieldType, FormSchema, StoredForm, Submission } from "./types";
 import { TESTNET_CONFIG, testnetTxUrl } from "./config";
 import {
@@ -194,14 +195,21 @@ function useDropdownPosition(triggerRef: React.RefObject<HTMLElement | null>, is
   const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
   useEffect(() => {
     if (!isOpen || !triggerRef.current) return;
+    let raf = 0;
     function update() {
-      const rect = triggerRef.current!.getBoundingClientRect();
-      setPos({ top: rect.bottom + window.scrollY + 6, left: rect.left + window.scrollX, width: rect.width });
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const el = triggerRef.current;
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        setPos({ top: rect.bottom + 6, left: rect.left, width: rect.width });
+      });
     }
     update();
     window.addEventListener("scroll", update, true);
     window.addEventListener("resize", update);
     return () => {
+      cancelAnimationFrame(raf);
       window.removeEventListener("scroll", update, true);
       window.removeEventListener("resize", update);
     };
@@ -1042,32 +1050,34 @@ function FieldEditorInline({ field, updateField }: { field: Field, updateField: 
         </button>
         <AnimatePresence>
           {selectOpen && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.12 }}
-              className="field-custom-select-dropdown"
-              style={{ position: "fixed", top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width, zIndex: 9999 }}
-            >
-              {fieldTypes.map(item => (
-                <button 
-                  key={item.type} 
-                  className={field.type === item.type ? "active" : ""}
-                  onClick={() => {
-                    updateField({
-                      type: item.type, 
-                      options: (item.type === "dropdown" || item.type === "checkboxes") 
-                        ? (options.length ? options : ["Option 1", "Option 2"]) 
-                        : undefined
-                    });
-                    setSelectOpen(false);
-                  }}
-                >
-                  <item.icon size={16} /> {item.label}
-                </button>
-              ))}
-            </motion.div>
+            <DropdownPortal>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.12 }}
+                className="field-custom-select-dropdown"
+                style={{ position: "absolute", top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width }}
+              >
+                {fieldTypes.map(item => (
+                  <button
+                    key={item.type}
+                    className={field.type === item.type ? "active" : ""}
+                    onClick={() => {
+                      updateField({
+                        type: item.type,
+                        options: (item.type === "dropdown" || item.type === "checkboxes")
+                          ? (options.length ? options : ["Option 1", "Option 2"])
+                          : undefined
+                      });
+                      setSelectOpen(false);
+                    }}
+                  >
+                    <item.icon size={16} /> {item.label}
+                  </button>
+                ))}
+              </motion.div>
+            </DropdownPortal>
           )}
         </AnimatePresence>
       </div>
@@ -1577,6 +1587,7 @@ function ResponseField({
   const [hoverRating, setHoverRating] = useState(0);
   const [isFileDragging, setIsFileDragging] = useState(false);
   const dropdownRef = useRef<HTMLButtonElement>(null);
+  const dropdownPos = useDropdownPosition(dropdownRef, dropdownOpen);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -1628,20 +1639,22 @@ function ResponseField({
           </button>
           <AnimatePresence>
             {dropdownOpen && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.12 }}
-                className="response-dropdown-menu"
-                style={{ position: "fixed", zIndex: 9999 }}
-              >
-                {field.options?.map((option) => (
-                  <button key={option} className={value === option ? "active" : ""} onClick={() => { onValue(option); setDropdownOpen(false); }}>
-                    {option}
-                  </button>
-                ))}
-              </motion.div>
+              <DropdownPortal>
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.12 }}
+                  className="response-dropdown-menu"
+                  style={{ position: "absolute", top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width }}
+                >
+                  {field.options?.map((option) => (
+                    <button key={option} className={value === option ? "active" : ""} onClick={() => { onValue(option); setDropdownOpen(false); }}>
+                      {option}
+                    </button>
+                  ))}
+                </motion.div>
+              </DropdownPortal>
             )}
           </AnimatePresence>
         </div>
@@ -1731,6 +1744,8 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
   const [priorityOpen, setPriorityOpen] = useState(false);
   const statusRef = useRef<HTMLButtonElement>(null);
   const priorityRef = useRef<HTMLButtonElement>(null);
+  const statusPos = useDropdownPosition(statusRef, statusOpen);
+  const priorityPos = useDropdownPosition(priorityRef, priorityOpen);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -1879,20 +1894,22 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
             </button>
             <AnimatePresence>
               {statusOpen && (
-                <motion.div 
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.12 }}
-                  className="filter-dropdown-menu"
-                  style={{ position: "fixed", zIndex: 9999 }}
-                >
-                  {["all", "new", "reviewed", "prioritized", "archived"].map((s) => (
-                    <button key={s} className={status === s ? "active" : ""} onClick={() => { setStatus(s); setStatusOpen(false); }}>
-                      {s === "all" ? "All statuses" : s.charAt(0).toUpperCase() + s.slice(1)}
-                    </button>
-                  ))}
-                </motion.div>
+                <DropdownPortal>
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.12 }}
+                    className="filter-dropdown-menu"
+                    style={{ position: "absolute", top: statusPos.top, left: statusPos.left }}
+                  >
+                    {["all", "new", "reviewed", "prioritized", "archived"].map((s) => (
+                      <button key={s} className={status === s ? "active" : ""} onClick={() => { setStatus(s); setStatusOpen(false); }}>
+                        {s === "all" ? "All statuses" : s.charAt(0).toUpperCase() + s.slice(1)}
+                      </button>
+                    ))}
+                  </motion.div>
+                </DropdownPortal>
               )}
             </AnimatePresence>
           </div>
@@ -1904,20 +1921,22 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
             </button>
             <AnimatePresence>
               {priorityOpen && (
-                <motion.div 
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.12 }}
-                  className="filter-dropdown-menu"
-                  style={{ position: "fixed", zIndex: 9999 }}
-                >
-                  {["all", "low", "medium", "high"].map((p) => (
+                <DropdownPortal>
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.12 }}
+                    className="filter-dropdown-menu"
+                    style={{ position: "absolute", top: priorityPos.top, left: priorityPos.left }}
+                  >
+                   {["all", "low", "medium", "high"].map((p) => (
                     <button key={p} className={priority === p ? "active" : ""} onClick={() => { setPriority(p); setPriorityOpen(false); }}>
                       {p === "all" ? "All priorities" : p.charAt(0).toUpperCase() + p.slice(1)}
                     </button>
                   ))}
-                </motion.div>
+                  </motion.div>
+                </DropdownPortal>
               )}
             </AnimatePresence>
           </div>
@@ -2068,20 +2087,22 @@ function StatusBadge({ value, onChange }: { value: Submission["status"]; onChang
       </button>
       <AnimatePresence>
         {open && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.12 }}
-            className="badge-dropdown-menu"
-            style={{ position: "fixed", top: dropdownPos.top, left: dropdownPos.left, zIndex: 9999 }}
-          >
-            {Object.entries(config).map(([key, cfg]) => (
-              <button key={key} className={value === key ? "active" : ""} onClick={() => { onChange(key); setOpen(false); }}>
-                <span className={`dot ${cfg.class}`} /> {cfg.label}
-              </button>
-            ))}
-          </motion.div>
+          <DropdownPortal>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.12 }}
+              className="badge-dropdown-menu"
+              style={{ position: "absolute", top: dropdownPos.top, left: dropdownPos.left }}
+            >
+              {Object.entries(config).map(([key, cfg]) => (
+                <button key={key} className={value === key ? "active" : ""} onClick={() => { onChange(key); setOpen(false); }}>
+                  <span className={`dot ${cfg.class}`} /> {cfg.label}
+                </button>
+              ))}
+            </motion.div>
+          </DropdownPortal>
         )}
       </AnimatePresence>
     </div>
@@ -2110,20 +2131,22 @@ function PriorityBadge({ value, onChange }: { value: Submission["priority"]; onC
       </button>
       <AnimatePresence>
         {open && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.12 }}
-            className="badge-dropdown-menu"
-            style={{ position: "fixed", top: dropdownPos.top, left: dropdownPos.left, zIndex: 9999 }}
-          >
-            {Object.entries(config).map(([key, cfg]) => (
-              <button key={key} className={value === key ? "active" : ""} onClick={() => { onChange(key); setOpen(false); }}>
-                <span className={`dot ${cfg.class}`} /> {cfg.label}
-              </button>
-            ))}
-          </motion.div>
+          <DropdownPortal>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.12 }}
+              className="badge-dropdown-menu"
+              style={{ position: "absolute", top: dropdownPos.top, left: dropdownPos.left }}
+            >
+              {Object.entries(config).map(([key, cfg]) => (
+                <button key={key} className={value === key ? "active" : ""} onClick={() => { onChange(key); setOpen(false); }}>
+                  <span className={`dot ${cfg.class}`} /> {cfg.label}
+                </button>
+              ))}
+            </motion.div>
+          </DropdownPortal>
         )}
       </AnimatePresence>
     </div>
