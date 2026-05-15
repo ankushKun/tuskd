@@ -1529,11 +1529,9 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
 
       {/* Footer */}
       <footer className="public-form-footer">
-        <motion.button
-          layout
+        <button
           className="walrus-pill"
           onClick={() => setShowProofs(!showProofs)}
-          transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
         >
           <Lock size={10} strokeWidth={2.5} />
           <AnimatePresence>
@@ -1560,7 +1558,7 @@ function PublicForm({ formId, navigate }: { formId: string; navigate: (path: str
             )}
           </AnimatePresence>
           <span className="walrus-pill-label">Powered by {activeForm.schemaBlob?.storage === "walrus" ? "Walrus" : "Local"}</span>
-        </motion.button>
+        </button>
       </footer>
     </div>
   );
