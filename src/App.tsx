@@ -1050,11 +1050,15 @@ function FieldEditorInline({ field, updateField }: { field: Field, updateField: 
   const usesOptions = field.type === "dropdown" || field.type === "checkboxes";
   const [selectOpen, setSelectOpen] = useState(false);
   const selectRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const dropdownPos = useDropdownPosition(selectRef, selectOpen);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (selectRef.current && !selectRef.current.contains(e.target as Node)) setSelectOpen(false);
+      const target = e.target as Node;
+      const insideTrigger = selectRef.current?.contains(target);
+      const insideMenu = menuRef.current?.contains(target);
+      if (!insideTrigger && !insideMenu) setSelectOpen(false);
     }
     if (selectOpen) document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
@@ -1075,6 +1079,7 @@ function FieldEditorInline({ field, updateField }: { field: Field, updateField: 
           {selectOpen && (
             <DropdownPortal>
               <motion.div
+                ref={menuRef}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -1618,12 +1623,16 @@ function TypeformField({
   const [hoverRating, setHoverRating] = useState(0);
   const [isFileDragging, setIsFileDragging] = useState(false);
   const dropdownRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const dropdownPos = useDropdownPosition(dropdownRef, dropdownOpen);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setDropdownOpen(false);
+      const target = e.target as Node;
+      const insideTrigger = dropdownRef.current?.contains(target);
+      const insideMenu = menuRef.current?.contains(target);
+      if (!insideTrigger && !insideMenu) setDropdownOpen(false);
     }
     if (dropdownOpen) document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
@@ -1676,6 +1685,7 @@ function TypeformField({
               {dropdownOpen && (
                 <DropdownPortal>
                   <motion.div
+                    ref={menuRef}
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
@@ -1780,13 +1790,16 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
   const [priorityOpen, setPriorityOpen] = useState(false);
   const statusRef = useRef<HTMLButtonElement>(null);
   const priorityRef = useRef<HTMLButtonElement>(null);
+  const statusMenuRef = useRef<HTMLDivElement>(null);
+  const priorityMenuRef = useRef<HTMLDivElement>(null);
   const statusPos = useDropdownPosition(statusRef, statusOpen);
   const priorityPos = useDropdownPosition(priorityRef, priorityOpen);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (statusRef.current && !statusRef.current.contains(e.target as Node)) setStatusOpen(false);
-      if (priorityRef.current && !priorityRef.current.contains(e.target as Node)) setPriorityOpen(false);
+      const target = e.target as Node;
+      if (statusRef.current && !statusRef.current.contains(target) && statusMenuRef.current && !statusMenuRef.current.contains(target)) setStatusOpen(false);
+      if (priorityRef.current && !priorityRef.current.contains(target) && priorityMenuRef.current && !priorityMenuRef.current.contains(target)) setPriorityOpen(false);
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
@@ -1932,6 +1945,7 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
               {statusOpen && (
                 <DropdownPortal>
                   <motion.div
+                    ref={statusMenuRef}
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
@@ -1959,6 +1973,7 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
               {priorityOpen && (
                 <DropdownPortal>
                   <motion.div
+                    ref={priorityMenuRef}
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
@@ -2103,9 +2118,15 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
 function StatusBadge({ value, onChange }: { value: Submission["status"]; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const dropdownPos = useDropdownPosition(triggerRef, open);
   useEffect(() => {
-    function handleClick(e: MouseEvent) { if (triggerRef.current && !triggerRef.current.contains(e.target as Node)) setOpen(false); }
+    function handleClick(e: MouseEvent) {
+      const target = e.target as Node;
+      const insideTrigger = triggerRef.current?.contains(target);
+      const insideMenu = menuRef.current?.contains(target);
+      if (!insideTrigger && !insideMenu) setOpen(false);
+    }
     if (open) document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
@@ -2125,6 +2146,7 @@ function StatusBadge({ value, onChange }: { value: Submission["status"]; onChang
         {open && (
           <DropdownPortal>
             <motion.div
+              ref={menuRef}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -2148,9 +2170,15 @@ function StatusBadge({ value, onChange }: { value: Submission["status"]; onChang
 function PriorityBadge({ value, onChange }: { value: Submission["priority"]; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const dropdownPos = useDropdownPosition(triggerRef, open);
   useEffect(() => {
-    function handleClick(e: MouseEvent) { if (triggerRef.current && !triggerRef.current.contains(e.target as Node)) setOpen(false); }
+    function handleClick(e: MouseEvent) {
+      const target = e.target as Node;
+      const insideTrigger = triggerRef.current?.contains(target);
+      const insideMenu = menuRef.current?.contains(target);
+      if (!insideTrigger && !insideMenu) setOpen(false);
+    }
     if (open) document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
@@ -2169,6 +2197,7 @@ function PriorityBadge({ value, onChange }: { value: Submission["priority"]; onC
         {open && (
           <DropdownPortal>
             <motion.div
+              ref={menuRef}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}

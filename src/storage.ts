@@ -250,7 +250,7 @@ export async function readJsonBlob<T>(receipt: BlobReceipt): Promise<T> {
 export function createDefaultSchema(): FormSchema {
   return {
     id: id("schema"),
-    title: "Untitled feedback form",
+    title: "Untitled Form",
     description: "Edit these starter questions, drag fields to reorder them, then publish a share link.",
     encrypted: false,
     layout: "standard",
