@@ -21,6 +21,14 @@ module tuskd::forms {
         media_blob_ids: vector<String>,
     }
 
+    public struct FormUpdatedEvent has copy, drop {
+        form_id: object::ID,
+        owner: address,
+        title: String,
+        description: String,
+        schema_blob_id: String,
+    }
+
     public struct StatusEvent has copy, drop {
         form_id: object::ID,
         submission_id: u64,
@@ -44,6 +52,29 @@ module tuskd::forms {
         };
 
         transfer::share_object(form);
+    }
+
+    entry fun update_form(
+        form: &mut Form,
+        title: String,
+        description: String,
+        schema_blob_id: String,
+        ctx: &TxContext,
+    ) {
+        let sender = tx_context::sender(ctx);
+        assert!(form.owner == sender, E_NOT_OWNER);
+
+        form.title = title;
+        form.description = description;
+        form.schema_blob_id = schema_blob_id;
+
+        event::emit(FormUpdatedEvent {
+            form_id: object::id(form),
+            owner: sender,
+            title,
+            description,
+            schema_blob_id,
+        });
     }
 
     entry fun submit(

@@ -55,6 +55,7 @@ export type StoredForm = {
   status: "draft" | "published";
   draftSchema: FormSchema;
   schema?: FormSchema;
+  archivedFields?: Field[];
   schemaBlob?: BlobReceipt;
   txDigest?: string;
   suiObjectId?: string;
@@ -69,6 +70,7 @@ export type Submission = {
   network: "sui-testnet";
   values: Record<string, string | string[] | number | BlobReceipt | null>;
   media: Record<string, BlobReceipt>;
+  fieldSnapshot?: Field[];
   submissionBlob: BlobReceipt;
   txDigest?: string;
   chainSubmissionId?: string;

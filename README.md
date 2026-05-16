@@ -34,13 +34,15 @@ The current Move package has been published to Sui Testnet.
 
 | Item | Value |
 | --- | --- |
-| Package ID | `0x593ad12342e188c4cde1d41b03ea8c740f4377d4586c8821f61482314616c0f3` |
-| Publish Tx | `BFSqWV1mSyvb9zD7W3ouKLSAjGP1BUXPbFPvqMGH4pJH` |
+| Package ID | `0x1704d61351767289142c1d60a307409d34f57fa7fc74eae38ef7ab546df21eb6` |
+| Type Package ID | `0x593ad12342e188c4cde1d41b03ea8c740f4377d4586c8821f61482314616c0f3` |
+| Upgrade Tx | `CZMRg3hHsoSnUHsQLWTJzsD8CKPKmuwYjzQaLkSBKdpX` |
 | Upgrade Cap | `0xa21b7c6e2b064ed3009582ea2a2feb916358f37f611ae2a0ed4a07d6fb3fcd77` |
 
 Move entry points:
 
 - `create_form(title, description, schema_blob_id)`
+- `update_form(form, title, description, schema_blob_id)`
 - `submit(form, submission_blob_id, media_blob_ids)`
 - `set_submission_status(form, submission_id, status, priority)`
 
@@ -65,7 +67,8 @@ VITE_SUI_RPC_URL=https://fullnode.testnet.sui.io:443
 VITE_WALRUS_PUBLISHER=https://publisher.walrus-testnet.walrus.space
 VITE_WALRUS_AGGREGATOR=https://aggregator.walrus-testnet.walrus.space
 VITE_WALRUS_EPOCHS=5
-VITE_TUSKD_PACKAGE_ID=0x593ad12342e188c4cde1d41b03ea8c740f4377d4586c8821f61482314616c0f3
+VITE_TUSKD_PACKAGE_ID=0x1704d61351767289142c1d60a307409d34f57fa7fc74eae38ef7ab546df21eb6
+VITE_TUSKD_TYPE_PACKAGE_ID=0x593ad12342e188c4cde1d41b03ea8c740f4377d4586c8821f61482314616c0f3
 ```
 
 `Walrus` and `Sui Testnet` calls are required. Upload or transaction failures stop the publish/submit flow instead of falling back to browser-only behavior.
@@ -110,7 +113,7 @@ After publishing, update `VITE_TUSKD_PACKAGE_ID` with the new package ID.
 2. Create a form from `/forms`.
 3. Edit questions and layout in `/builder/:formId`.
 4. Publish the form.
-5. The app uploads the schema to Walrus, signs a `create_form` transaction, and stores the Sui form object ID.
+5. The app uploads the schema to Walrus, signs `create_form` for new forms or `update_form` for published edits, and stores the Sui form object ID.
 6. Share the public `/f/:formId` link.
 7. Respondents connect a wallet, submit answers/media, and sign a `submit` transaction.
 8. Admins review responses in `/admin/:formId` and sign status/priority updates on Sui.

@@ -1,7 +1,7 @@
-import type { AppStore, BlobReceipt, FormSchema, PublishedForm, StoredForm, Submission } from "./types";
+import type { AppStore, BlobReceipt, Field, FormSchema, PublishedForm, StoredForm, Submission } from "./types";
 import { TESTNET_CONFIG } from "./config";
 
-const STORE_KEY = "tuskd:v1";
+const STORE_KEY = "tuskd:v2";
 const LEGACY_STORE_KEY = `${"tusk"}table:v1`;
 
 const publisher = TESTNET_CONFIG.walrusPublisher;
@@ -13,7 +13,7 @@ export function id(prefix: string) {
 }
 
 export function readStore(): AppStore {
-  const raw = localStorage.getItem(STORE_KEY) ?? localStorage.getItem(LEGACY_STORE_KEY);
+  const raw = localStorage.getItem(STORE_KEY);
   if (!raw) return { forms: [], submissions: [] };
   try {
     return migrateStore(JSON.parse(raw));
@@ -84,6 +84,7 @@ export function publishStoredForm(formId: string, schema: FormSchema, schemaBlob
   const store = readStore();
   const existing = store.forms.find((form) => form.id === formId);
   const now = new Date().toISOString();
+  const archivedFields = mergeArchivedFields(existing, schema);
   const form: StoredForm = {
     id: formId,
     owner: existing?.owner ?? owner,
@@ -91,15 +92,30 @@ export function publishStoredForm(formId: string, schema: FormSchema, schemaBlob
     status: "published",
     draftSchema: schema,
     schema,
+    ...(archivedFields.length ? { archivedFields } : {}),
     schemaBlob,
     txDigest,
     suiObjectId,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
-    publishedAt: now,
+    publishedAt: existing?.publishedAt ?? now,
   };
   writeStore({ ...store, forms: [form, ...store.forms.filter((item) => item.id !== formId)] });
   return form;
+}
+
+function mergeArchivedFields(existing: StoredForm | undefined, nextSchema: FormSchema): Field[] {
+  const nextIds = new Set(nextSchema.fields.map((field) => field.id));
+  const candidates = [
+    ...(existing?.archivedFields ?? []),
+    ...(existing?.schema?.fields ?? []),
+    ...(existing?.draftSchema?.fields ?? []),
+  ];
+  const archived = new Map<string, Field>();
+  for (const field of candidates) {
+    if (!nextIds.has(field.id)) archived.set(field.id, field);
+  }
+  return [...archived.values()];
 }
 
 export function saveSubmission(submission: Submission) {
@@ -159,6 +175,7 @@ function migrateForm(form: unknown): StoredForm | null {
       ...raw,
       network: "sui-testnet",
       status: raw.status ?? (raw.schemaBlob ? "published" : "draft"),
+      archivedFields: Array.isArray(raw.archivedFields) ? raw.archivedFields : undefined,
       updatedAt: raw.updatedAt ?? raw.publishedAt ?? raw.createdAt,
     } as StoredForm;
   }
@@ -170,6 +187,7 @@ function migrateForm(form: unknown): StoredForm | null {
       status: "published",
       draftSchema: raw.schema,
       schema: raw.schema,
+      archivedFields: Array.isArray(raw.archivedFields) ? raw.archivedFields : undefined,
       schemaBlob: raw.schemaBlob,
       txDigest: raw.txDigest,
       suiObjectId: raw.suiObjectId,

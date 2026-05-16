@@ -170,22 +170,30 @@ function schemaFingerprint(schema: FormSchema) {
   });
 }
 
-function contractTarget(functionName: "create_form" | "submit" | "set_submission_status") {
+function contractTarget(functionName: "create_form" | "update_form" | "submit" | "set_submission_status") {
   if (!TESTNET_CONFIG.tuskdPackageId) {
     throw new Error("Set VITE_TUSKD_PACKAGE_ID to your published Sui Testnet package ID.");
   }
   return `${TESTNET_CONFIG.tuskdPackageId}::forms::${functionName}`;
 }
 
+function contractTypeTarget(name: "Form" | "SubmissionEvent" | "StatusEvent") {
+  const packageId = TESTNET_CONFIG.tuskdTypePackageId || TESTNET_CONFIG.tuskdPackageId;
+  if (!packageId) {
+    throw new Error("Set VITE_TUSKD_PACKAGE_ID to your published Sui Testnet package ID.");
+  }
+  return `${packageId}::forms::${name}`;
+}
+
 function findCreatedFormObjectId(tx: unknown) {
   const changes = (tx as { objectChanges?: Array<{ type?: string; objectType?: string; objectId?: string }> }).objectChanges ?? [];
-  const formType = `${TESTNET_CONFIG.tuskdPackageId}::forms::Form`.toLowerCase();
+  const formType = contractTypeTarget("Form").toLowerCase();
   return changes.find((change) => change.type === "created" && change.objectType?.toLowerCase() === formType)?.objectId ?? "";
 }
 
 function findSubmissionEventId(tx: unknown) {
   const events = (tx as { events?: Array<{ type?: string; parsedJson?: { submission_id?: string | number } }> }).events ?? [];
-  const eventType = `${TESTNET_CONFIG.tuskdPackageId}::forms::SubmissionEvent`.toLowerCase();
+  const eventType = contractTypeTarget("SubmissionEvent").toLowerCase();
   const event = events.find((item) => item.type?.toLowerCase() === eventType);
   const value = event?.parsedJson?.submission_id;
   return value === undefined ? "" : String(value);
@@ -250,7 +258,7 @@ async function fetchPublishedFormFromSui(formObjectId: string, suiClient: Return
 
 function findCreatedFormObjectIds(tx: unknown) {
   const changes = (tx as { objectChanges?: Array<{ type?: string; objectType?: string; objectId?: string }> }).objectChanges ?? [];
-  const formType = `${TESTNET_CONFIG.tuskdPackageId}::forms::Form`.toLowerCase();
+  const formType = contractTypeTarget("Form").toLowerCase();
   return changes
     .filter((change) => change.type === "created" && change.objectType?.toLowerCase() === formType && change.objectId)
     .map((change) => change.objectId as string);
@@ -323,6 +331,7 @@ const priorityFromCode: Record<string, Submission["priority"]> = {
 type SubmissionPayload = {
   values?: Submission["values"];
   media?: Record<string, BlobReceipt>;
+  fieldSnapshot?: Field[];
   submitter?: string;
   createdAt?: string;
 };
@@ -351,7 +360,7 @@ type SuiEventLike = {
 };
 
 function moveEventType(name: "SubmissionEvent" | "StatusEvent") {
-  return `${TESTNET_CONFIG.tuskdPackageId}::forms::${name}`;
+  return contractTypeTarget(name);
 }
 
 function normalizeObjectId(value: string | undefined) {
@@ -451,6 +460,7 @@ async function fetchSubmissionsForFormFromSui(form: StoredForm, suiClient: Retur
         network: "sui-testnet",
         values: { ...(payload.values ?? {}), ...media },
         media,
+        fieldSnapshot: payload.fieldSnapshot,
         submissionBlob,
         txDigest: event.id.txDigest,
         chainSubmissionId,
@@ -510,6 +520,7 @@ async function fetchRecentSubmissionsForFormsFromSui(forms: StoredForm[], suiCli
         network: "sui-testnet",
         values: { ...(payload.values ?? {}), ...media },
         media,
+        fieldSnapshot: payload.fieldSnapshot,
         submissionBlob,
         txDigest: event.id.txDigest,
         chainSubmissionId,
@@ -572,9 +583,46 @@ function responsePreview(form: StoredForm, submission: Submission) {
     const value = formatValue(submission.values[field.id]);
     if (value) return `${field.label}: ${value}`;
   }
+  const archived = archivedAnswerFields(form, schema, submission);
+  if (archived.length) {
+    const field = archived[0];
+    return `${field.label}: ${formatValue(submission.values[field.id])}`;
+  }
   const mediaCount = Object.keys(submission.media).length;
   if (mediaCount) return `${mediaCount} file${mediaCount === 1 ? "" : "s"} attached`;
   return "No answer preview";
+}
+
+function archivedAnswerFields(form: StoredForm, schema: FormSchema, submission: Submission) {
+  const activeIds = new Set(schema.fields.map((field) => field.id));
+  const fieldById = new Map<string, Field>();
+  for (const field of form.archivedFields ?? []) fieldById.set(field.id, field);
+  for (const field of submission.fieldSnapshot ?? []) {
+    if (!fieldById.has(field.id)) fieldById.set(field.id, field);
+  }
+
+  return Object.keys(submission.values)
+    .filter((fieldId) => !activeIds.has(fieldId) && Boolean(formatValue(submission.values[fieldId])))
+    .map((fieldId) => fieldById.get(fieldId) ?? archivedFallbackField(fieldId));
+}
+
+function archivedFallbackField(fieldId: string): Field {
+  return {
+    id: fieldId,
+    type: "shortText",
+    label: `Archived answer ${fieldId.slice(0, 8)}`,
+    required: false,
+  };
+}
+
+function archivedFieldsForSubmissions(form: StoredForm, schema: FormSchema, submissions: Submission[]) {
+  const fields = new Map<string, Field>();
+  for (const submission of submissions) {
+    for (const field of archivedAnswerFields(form, schema, submission)) {
+      if (!fields.has(field.id)) fields.set(field.id, field);
+    }
+  }
+  return [...fields.values()];
 }
 
 function TuskDMark({ className = "", title = "TuskD" }: { className?: string; title?: string }) {
@@ -1718,31 +1766,55 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
     try {
       const canUseWallet = await ensureTestnetWallet();
       if (!canUseWallet) return;
-      contractTarget("create_form");
-      const nextSchema = { ...schema, id: id("schema"), createdAt: new Date().toISOString() };
-      const schemaBlob = await uploadJson(nextSchema, "form-schema.json");
       const owner = account.address;
-      const current = form ?? createDraftForm(nextSchema, owner);
+      const current = form ?? createDraftForm(schema, owner);
+      const existingObjectId = current.status === "published" ? formObjectId(current) : "";
+      const shouldUpdate = Boolean(existingObjectId);
+      if (shouldUpdate && current.owner && current.owner.toLowerCase() !== owner.toLowerCase()) {
+        toast.error("Connect the form owner wallet to update this published form.");
+        return;
+      }
+
+      contractTarget(shouldUpdate ? "update_form" : "create_form");
+      const now = new Date().toISOString();
+      const nextSchema = {
+        ...schema,
+        id: current.schema?.id ?? current.draftSchema.id ?? schema.id ?? id("schema"),
+        createdAt: current.schema?.createdAt ?? current.draftSchema.createdAt ?? schema.createdAt ?? now,
+      };
+      const schemaBlob = await uploadJson(nextSchema, "form-schema.json");
       const tx = new Transaction();
-      tx.moveCall({
-        target: contractTarget("create_form"),
-        arguments: [
-          tx.pure.string(nextSchema.title),
-          tx.pure.string(nextSchema.description),
-          tx.pure.string(schemaBlob.id),
-        ],
-      });
+      if (shouldUpdate) {
+        tx.moveCall({
+          target: contractTarget("update_form"),
+          arguments: [
+            tx.object(existingObjectId),
+            tx.pure.string(nextSchema.title),
+            tx.pure.string(nextSchema.description),
+            tx.pure.string(schemaBlob.id),
+          ],
+        });
+      } else {
+        tx.moveCall({
+          target: contractTarget("create_form"),
+          arguments: [
+            tx.pure.string(nextSchema.title),
+            tx.pure.string(nextSchema.description),
+            tx.pure.string(schemaBlob.id),
+          ],
+        });
+      }
       const txResult = await signAndExecute.mutateAsync({ transaction: tx, chain: SUI_TESTNET_CHAIN });
       const txDetails = await suiClient.waitForTransaction({
         digest: txResult.digest,
         options: { showObjectChanges: true },
       });
-      const suiObjectId = findCreatedFormObjectId(txDetails);
+      const suiObjectId = shouldUpdate ? existingObjectId : findCreatedFormObjectId(txDetails);
       if (!suiObjectId) throw new Error("Sui transaction succeeded, but the created form object was not found.");
       const publishedForm = publishStoredForm(current.id, nextSchema, schemaBlob, owner, txResult.digest, suiObjectId);
       setForm(publishedForm);
       setSchema(publishedForm.draftSchema);
-      toast.success("Form published successfully to Walrus Testnet");
+      toast.success(shouldUpdate ? "Form updated on Sui Testnet" : "Form published successfully to Walrus Testnet");
       if (!formId) navigate(`/builder/${publishedForm.id}`);
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Unable to publish this form.";
@@ -2491,6 +2563,7 @@ function PublicFormLoaded({ form, formId, navigate }: { form: StoredForm; formId
         formId: activeForm.id,
         values: { ...values },
         media,
+        fieldSnapshot: activeSchema.fields,
         submitter,
         createdAt: new Date().toISOString(),
       };
@@ -2517,6 +2590,7 @@ function PublicFormLoaded({ form, formId, navigate }: { form: StoredForm; formId
         network: "sui-testnet",
         values: { ...values, ...media },
         media,
+        fieldSnapshot: activeSchema.fields,
         submissionBlob,
         txDigest: txResult.digest,
         chainSubmissionId,
@@ -3097,6 +3171,7 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
 
   const activeForm = form;
   const adminSchema = activeForm.schema ?? activeForm.draftSchema;
+  const hasArchivedAnswers = submissions.some((submission) => archivedAnswerFields(activeForm, adminSchema, submission).length > 0);
 
   if (activeForm.status !== "published" || !activeForm.schema) {
     return (
@@ -3179,15 +3254,18 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
 
   function exportCsv() {
     const fields = adminSchema.fields;
+    const archivedFields = archivedFieldsForSubmissions(activeForm, adminSchema, filtered);
     const headers = [
       "submission_id", "created_at", "status", "priority", "submitter", "submission_blob", "tx_digest",
       ...fields.map((field) => field.label),
+      ...archivedFields.map((field) => `[Archived] ${field.label}`),
     ];
     const rows = filtered.map((submission) =>
       [
         submission.id, submission.createdAt, submission.status, submission.priority,
         submission.submitter, submission.submissionBlob.id, submission.txDigest ?? "",
         ...fields.map((field) => formatValue(submission.values[field.id])),
+        ...archivedFields.map((field) => formatValue(submission.values[field.id])),
       ].map(csvCell),
     );
     const csv = [headers.map(csvCell), ...rows].map((row) => row.join(",")).join("\n");
@@ -3388,76 +3466,103 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
                   <th key={field.id}>{field.label}</th>
                 ))}
                 {adminSchema.fields.length > 4 && <th>...</th>}
+                {hasArchivedAnswers && <th>Archived</th>}
                 <th>Media</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((submission) => (
-                <tr key={submission.id}>
-                  <td>
-                    <div className="cell-date">{new Date(submission.createdAt).toLocaleDateString()}</div>
-                    <div className="cell-time">{new Date(submission.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
-                  </td>
-                  <td>
-                    <StatusBadge value={submission.status} pending={Boolean(pendingReviewPatches[submission.id]?.status)} disabled={savingReviewChanges} onChange={(v) => queueReviewPatch(submission.id, { status: v as Submission["status"] })} />
-                  </td>
-                  <td>
-                    <PriorityBadge value={submission.priority} pending={Boolean(pendingReviewPatches[submission.id]?.priority)} disabled={savingReviewChanges} onChange={(v) => queueReviewPatch(submission.id, { priority: v as Submission["priority"] })} />
-                  </td>
-                  {adminSchema.fields.slice(0, 4).map((field) => (
-                    <td key={field.id}>
-                      <span className="cell-value" title={formatValue(submission.values[field.id])}>
-                        {formatValue(submission.values[field.id]) || "-"}
-                      </span>
+              {filtered.map((submission) => {
+                const archivedAnswers = archivedAnswerFields(activeForm, adminSchema, submission);
+                return (
+                  <tr key={submission.id}>
+                    <td>
+                      <div className="cell-date">{new Date(submission.createdAt).toLocaleDateString()}</div>
+                      <div className="cell-time">{new Date(submission.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
                     </td>
-                  ))}
-                  {adminSchema.fields.length > 4 && <td className="cell-muted">+{adminSchema.fields.length - 4}</td>}
-                  <td>
-                    {Object.values(submission.media).length > 0 ? (
-                      <span className="media-badge">{Object.values(submission.media).length} file{Object.values(submission.media).length === 1 ? "" : "s"}</span>
-                    ) : (
-                      <span className="cell-muted">-</span>
+                    <td>
+                      <StatusBadge value={submission.status} pending={Boolean(pendingReviewPatches[submission.id]?.status)} disabled={savingReviewChanges} onChange={(v) => queueReviewPatch(submission.id, { status: v as Submission["status"] })} />
+                    </td>
+                    <td>
+                      <PriorityBadge value={submission.priority} pending={Boolean(pendingReviewPatches[submission.id]?.priority)} disabled={savingReviewChanges} onChange={(v) => queueReviewPatch(submission.id, { priority: v as Submission["priority"] })} />
+                    </td>
+                    {adminSchema.fields.slice(0, 4).map((field) => (
+                      <td key={field.id}>
+                        <span className="cell-value" title={formatValue(submission.values[field.id])}>
+                          {formatValue(submission.values[field.id]) || "-"}
+                        </span>
+                      </td>
+                    ))}
+                    {adminSchema.fields.length > 4 && <td className="cell-muted">+{adminSchema.fields.length - 4}</td>}
+                    {hasArchivedAnswers && (
+                      <td>
+                        {archivedAnswers.length > 0 ? (
+                          <span className="archived-answer-count">{archivedAnswers.length} hidden</span>
+                        ) : (
+                          <span className="cell-muted">-</span>
+                        )}
+                      </td>
                     )}
-                  </td>
-                </tr>
-              ))}
+                    <td>
+                      {Object.values(submission.media).length > 0 ? (
+                        <span className="media-badge">{Object.values(submission.media).length} file{Object.values(submission.media).length === 1 ? "" : "s"}</span>
+                      ) : (
+                        <span className="cell-muted">-</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       ) : (
         <div className="submission-grid">
-          {filtered.map((submission) => (
-            <article className="submission-card" key={submission.id}>
-              <div className="submission-card-header">
-                <div className="submission-card-date">
-                  <Calendar size={14} />
-                  {new Date(submission.createdAt).toLocaleString()}
-                </div>
-                <div className="submission-card-badges">
-                  <StatusBadge value={submission.status} pending={Boolean(pendingReviewPatches[submission.id]?.status)} disabled={savingReviewChanges} onChange={(v) => queueReviewPatch(submission.id, { status: v as Submission["status"] })} />
-                  <PriorityBadge value={submission.priority} pending={Boolean(pendingReviewPatches[submission.id]?.priority)} disabled={savingReviewChanges} onChange={(v) => queueReviewPatch(submission.id, { priority: v as Submission["priority"] })} />
-                </div>
-              </div>
-              <div className="submission-card-body">
-                {adminSchema.fields.map((field) => (
-                  <div key={field.id} className="submission-answer">
-                    <span className="submission-answer-label">{field.label}</span>
-                    <span className="submission-answer-value">{formatValue(submission.values[field.id]) || "-"}</span>
+          {filtered.map((submission) => {
+            const archivedAnswers = archivedAnswerFields(activeForm, adminSchema, submission);
+            return (
+              <article className="submission-card" key={submission.id}>
+                <div className="submission-card-header">
+                  <div className="submission-card-date">
+                    <Calendar size={14} />
+                    {new Date(submission.createdAt).toLocaleString()}
                   </div>
-                ))}
-              </div>
-              {Object.values(submission.media).length > 0 && (
-                <div className="submission-card-media">
-                  {Object.values(submission.media).map((blob) => (
-                    <a href={blob.url} target="_blank" rel="noreferrer" key={blob.id}>
-                      {blob.contentType?.startsWith("image") ? <Image size={14} /> : <FileVideo size={14} />}
-                      {blob.name || blob.id.slice(0, 10)}...
-                    </a>
+                  <div className="submission-card-badges">
+                    <StatusBadge value={submission.status} pending={Boolean(pendingReviewPatches[submission.id]?.status)} disabled={savingReviewChanges} onChange={(v) => queueReviewPatch(submission.id, { status: v as Submission["status"] })} />
+                    <PriorityBadge value={submission.priority} pending={Boolean(pendingReviewPatches[submission.id]?.priority)} disabled={savingReviewChanges} onChange={(v) => queueReviewPatch(submission.id, { priority: v as Submission["priority"] })} />
+                  </div>
+                </div>
+                <div className="submission-card-body">
+                  {adminSchema.fields.map((field) => (
+                    <div key={field.id} className="submission-answer">
+                      <span className="submission-answer-label">{field.label}</span>
+                      <span className="submission-answer-value">{formatValue(submission.values[field.id]) || "-"}</span>
+                    </div>
                   ))}
                 </div>
-              )}
-            </article>
-          ))}
+                {archivedAnswers.length > 0 && (
+                  <div className="archived-answers">
+                    <div className="archived-answers-title">Archived answers</div>
+                    {archivedAnswers.map((field) => (
+                      <div key={field.id} className="submission-answer archived">
+                        <span className="submission-answer-label">{field.label}</span>
+                        <span className="submission-answer-value">{formatValue(submission.values[field.id]) || "-"}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {Object.values(submission.media).length > 0 && (
+                  <div className="submission-card-media">
+                    {Object.values(submission.media).map((blob) => (
+                      <a href={blob.url} target="_blank" rel="noreferrer" key={blob.id}>
+                        {blob.contentType?.startsWith("image") ? <Image size={14} /> : <FileVideo size={14} />}
+                        {blob.name || blob.id.slice(0, 10)}...
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </article>
+            );
+          })}
         </div>
       )}
     </section>
