@@ -104,7 +104,13 @@ export function publishStoredForm(formId: string, schema: FormSchema, schemaBlob
 
 export function saveSubmission(submission: Submission) {
   const store = readStore();
-  writeStore({ ...store, submissions: [submission, ...store.submissions.filter((item) => item.id !== submission.id)] });
+  writeStore({
+    ...store,
+    submissions: [
+      submission,
+      ...store.submissions.filter((item) => !isSameSubmission(item, submission)),
+    ],
+  });
 }
 
 export function updateSubmission(next: Submission) {
@@ -119,8 +125,20 @@ export function getForm(formId: string) {
   return readStore().forms.find((form) => form.id === formId) ?? null;
 }
 
-export function getSubmissions(formId: string) {
-  return readStore().submissions.filter((submission) => submission.formId === formId);
+export function getSubmissions(formId: string, ...aliases: Array<string | undefined>) {
+  const formIds = new Set([formId, ...aliases].filter(Boolean).map((value) => value!.toLowerCase()));
+  return readStore().submissions.filter((submission) => formIds.has(submission.formId.toLowerCase()));
+}
+
+function isSameSubmission(a: Submission, b: Submission) {
+  if (a.id === b.id) return true;
+  if (a.txDigest && b.txDigest && a.txDigest === b.txDigest) return true;
+  return Boolean(
+    a.chainSubmissionId &&
+      b.chainSubmissionId &&
+      a.chainSubmissionId === b.chainSubmissionId &&
+      a.formId.toLowerCase() === b.formId.toLowerCase(),
+  );
 }
 
 function migrateStore(value: unknown): AppStore {

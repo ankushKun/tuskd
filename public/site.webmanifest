@@ -1,0 +1,17 @@
+{
+  "name": "TuskD Forms",
+  "short_name": "TuskD",
+  "description": "Walrus-native forms with Sui-signed publishing and submissions.",
+  "start_url": "/forms",
+  "display": "standalone",
+  "background_color": "#ECEFF4",
+  "theme_color": "#5E81AC",
+  "icons": [
+    {
+      "src": "/tuskd-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

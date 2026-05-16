@@ -46,7 +46,7 @@ import {
   Github,
   MoreHorizontal,
 } from "lucide-react";
-import React, { useCallback, useEffect, useMemo, useState, createContext, useContext, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useState, createContext, useContext, useRef, useId } from "react";
 import { toast } from "sonner";
 import {
   DndContext,
@@ -307,6 +307,295 @@ const priorityCode: Record<Submission["priority"], number> = {
   high: 2,
 };
 
+const statusFromCode: Record<string, Submission["status"]> = {
+  0: "new",
+  1: "reviewed",
+  2: "prioritized",
+  3: "archived",
+};
+
+const priorityFromCode: Record<string, Submission["priority"]> = {
+  0: "low",
+  1: "medium",
+  2: "high",
+};
+
+type SubmissionPayload = {
+  values?: Submission["values"];
+  media?: Record<string, BlobReceipt>;
+  submitter?: string;
+  createdAt?: string;
+};
+
+type FormSubmissionEvent = {
+  form_id?: string;
+  submission_id?: string | number;
+  submitter?: string;
+  submission_blob_id?: string;
+};
+
+type FormStatusEvent = {
+  form_id?: string;
+  submission_id?: string | number;
+  status?: string | number;
+  priority?: string | number;
+};
+
+type SuiEventLike = {
+  id: {
+    txDigest: string;
+  };
+  parsedJson: unknown;
+  sender?: string;
+  timestampMs?: string | null;
+};
+
+function moveEventType(name: "SubmissionEvent" | "StatusEvent") {
+  return `${TESTNET_CONFIG.tuskdPackageId}::forms::${name}`;
+}
+
+function normalizeObjectId(value: string | undefined) {
+  return (value ?? "").toLowerCase();
+}
+
+function formObjectId(form: StoredForm) {
+  return form.suiObjectId || (isLocalFormId(form.id) ? "" : form.id);
+}
+
+function formSubmissionIds(form: StoredForm) {
+  return [form.id, form.suiObjectId].filter(Boolean) as string[];
+}
+
+function getStoredSubmissionsForForm(form: StoredForm) {
+  return getSubmissions(form.id, form.suiObjectId);
+}
+
+function responseCount(form: StoredForm) {
+  return getStoredSubmissionsForForm(form).length;
+}
+
+function lastSubmissionAt(form: StoredForm) {
+  const dates = getStoredSubmissionsForForm(form)
+    .map((submission) => submission.createdAt)
+    .sort();
+  return dates[dates.length - 1];
+}
+
+async function fetchStatusUpdatesForFormFromSui(form: StoredForm, suiClient: ReturnType<typeof useSuiClient>) {
+  if (!TESTNET_CONFIG.tuskdPackageId) return new Map<string, Pick<Submission, "status" | "priority">>();
+  const ids = new Set(formSubmissionIds(form).map(normalizeObjectId));
+  const updates = new Map<string, Pick<Submission, "status" | "priority">>();
+  let cursor: { txDigest: string; eventSeq: string } | null | undefined;
+
+  for (let page = 0; page < 10; page += 1) {
+    const response = await suiClient.queryEvents({
+      query: { MoveEventType: moveEventType("StatusEvent") },
+      cursor,
+      limit: 50,
+      order: "descending",
+    });
+
+    for (const event of response.data as SuiEventLike[]) {
+      const parsed = event.parsedJson as FormStatusEvent;
+      const submissionId = parsed.submission_id === undefined ? "" : String(parsed.submission_id);
+      if (!ids.has(normalizeObjectId(parsed.form_id)) || !submissionId || updates.has(submissionId)) continue;
+      const status = statusFromCode[String(parsed.status)] ?? "new";
+      const priority = priorityFromCode[String(parsed.priority)] ?? "medium";
+      updates.set(submissionId, { status, priority });
+    }
+
+    if (!response.hasNextPage || !response.nextCursor) break;
+    cursor = response.nextCursor;
+  }
+
+  return updates;
+}
+
+async function fetchSubmissionsForFormFromSui(form: StoredForm, suiClient: ReturnType<typeof useSuiClient>) {
+  if (!TESTNET_CONFIG.tuskdPackageId) return [];
+  const ids = new Set(formSubmissionIds(form).map(normalizeObjectId));
+  const statusUpdates = await fetchStatusUpdatesForFormFromSui(form, suiClient);
+  const submissions: Submission[] = [];
+  let cursor: { txDigest: string; eventSeq: string } | null | undefined;
+
+  for (let page = 0; page < 10; page += 1) {
+    const response = await suiClient.queryEvents({
+      query: { MoveEventType: moveEventType("SubmissionEvent") },
+      cursor,
+      limit: 50,
+      order: "descending",
+    });
+
+    for (const event of response.data as SuiEventLike[]) {
+      const parsed = event.parsedJson as FormSubmissionEvent;
+      if (!ids.has(normalizeObjectId(parsed.form_id)) || !parsed.submission_blob_id) continue;
+
+      const chainSubmissionId = parsed.submission_id === undefined ? "" : String(parsed.submission_id);
+      const submissionBlob = walrusJsonReceipt(parsed.submission_blob_id, "submission.json");
+      let payload: SubmissionPayload = {};
+      try {
+        payload = await readJsonBlob<SubmissionPayload>(submissionBlob);
+      } catch {
+        payload = {};
+      }
+
+      const media = payload.media ?? {};
+      const reviewState = chainSubmissionId ? statusUpdates.get(chainSubmissionId) : undefined;
+      const createdAt =
+        payload.createdAt ||
+        (event.timestampMs ? new Date(Number(event.timestampMs)).toISOString() : new Date().toISOString());
+
+      submissions.push({
+        id: `chain_${normalizeObjectId(parsed.form_id)}_${chainSubmissionId || event.id.txDigest}`,
+        formId: form.id,
+        network: "sui-testnet",
+        values: { ...(payload.values ?? {}), ...media },
+        media,
+        submissionBlob,
+        txDigest: event.id.txDigest,
+        chainSubmissionId,
+        submitter: parsed.submitter || payload.submitter || event.sender || "",
+        createdAt,
+        status: reviewState?.status ?? "new",
+        priority: reviewState?.priority ?? "medium",
+      });
+    }
+
+    if (!response.hasNextPage || !response.nextCursor) break;
+    cursor = response.nextCursor;
+  }
+
+  return submissions;
+}
+
+async function fetchRecentSubmissionsForFormsFromSui(forms: StoredForm[], suiClient: ReturnType<typeof useSuiClient>, limit = 5) {
+  if (!TESTNET_CONFIG.tuskdPackageId) return [];
+  const formById = new Map<string, StoredForm>();
+  for (const form of forms) {
+    for (const formId of formSubmissionIds(form)) {
+      formById.set(normalizeObjectId(formId), form);
+    }
+  }
+  if (!formById.size) return [];
+
+  const submissions: Submission[] = [];
+  let cursor: { txDigest: string; eventSeq: string } | null | undefined;
+
+  for (let page = 0; page < 10 && submissions.length < limit; page += 1) {
+    const response = await suiClient.queryEvents({
+      query: { MoveEventType: moveEventType("SubmissionEvent") },
+      cursor,
+      limit: 50,
+      order: "descending",
+    });
+
+    for (const event of response.data as SuiEventLike[]) {
+      const parsed = event.parsedJson as FormSubmissionEvent;
+      const form = formById.get(normalizeObjectId(parsed.form_id));
+      if (!form || !parsed.submission_blob_id) continue;
+
+      const chainSubmissionId = parsed.submission_id === undefined ? "" : String(parsed.submission_id);
+      const submissionBlob = walrusJsonReceipt(parsed.submission_blob_id, "submission.json");
+      let payload: SubmissionPayload = {};
+      try {
+        payload = await readJsonBlob<SubmissionPayload>(submissionBlob);
+      } catch {
+        payload = {};
+      }
+
+      const media = payload.media ?? {};
+      submissions.push({
+        id: `chain_${normalizeObjectId(parsed.form_id)}_${chainSubmissionId || event.id.txDigest}`,
+        formId: form.id,
+        network: "sui-testnet",
+        values: { ...(payload.values ?? {}), ...media },
+        media,
+        submissionBlob,
+        txDigest: event.id.txDigest,
+        chainSubmissionId,
+        submitter: parsed.submitter || payload.submitter || event.sender || "",
+        createdAt:
+          payload.createdAt ||
+          (event.timestampMs ? new Date(Number(event.timestampMs)).toISOString() : new Date().toISOString()),
+        status: "new",
+        priority: "medium",
+      });
+
+      if (submissions.length >= limit) break;
+    }
+
+    if (!response.hasNextPage || !response.nextCursor) break;
+    cursor = response.nextCursor;
+  }
+
+  return submissions;
+}
+
+type RecentResponse = {
+  form: StoredForm;
+  submission: Submission;
+};
+
+function recentResponsesForForms(forms: StoredForm[], limit = 5): RecentResponse[] {
+  return forms
+    .flatMap((form) => getStoredSubmissionsForForm(form).map((submission) => ({ form, submission })))
+    .sort((a, b) => b.submission.createdAt.localeCompare(a.submission.createdAt))
+    .slice(0, limit);
+}
+
+function matchingSubmission(form: StoredForm, candidate: Submission) {
+  return getStoredSubmissionsForForm(form).find((submission) => {
+    if (submission.id === candidate.id) return true;
+    if (submission.txDigest && candidate.txDigest && submission.txDigest === candidate.txDigest) return true;
+    return Boolean(
+      submission.chainSubmissionId &&
+        candidate.chainSubmissionId &&
+        submission.chainSubmissionId === candidate.chainSubmissionId,
+    );
+  });
+}
+
+function mergeExistingReviewState(form: StoredForm, submission: Submission) {
+  const existing = matchingSubmission(form, submission);
+  if (!existing) return submission;
+  return {
+    ...submission,
+    id: existing.id,
+    status: existing.status,
+    priority: existing.priority,
+  };
+}
+
+function responsePreview(form: StoredForm, submission: Submission) {
+  const schema = form.schema ?? form.draftSchema;
+  for (const field of schema.fields) {
+    const value = formatValue(submission.values[field.id]);
+    if (value) return `${field.label}: ${value}`;
+  }
+  const mediaCount = Object.keys(submission.media).length;
+  if (mediaCount) return `${mediaCount} file${mediaCount === 1 ? "" : "s"} attached`;
+  return "No answer preview";
+}
+
+function TuskDMark({ className = "", title = "TuskD" }: { className?: string; title?: string }) {
+  const idBase = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const bgId = `tuskd-mark-bg-${idBase}`;
+  return (
+    <svg className={className} viewBox="0 0 64 64" role="img" aria-label={title}>
+      <defs>
+        <linearGradient id={bgId} x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#2E3440" />
+          <stop offset="1" stopColor="#1F2430" />
+        </linearGradient>
+      </defs>
+      <rect x="6" y="6" width="52" height="52" rx="14" fill={`url(#${bgId})`} />
+      <rect x="14" y="14" width="36" height="8" rx="4" fill="#8FBCBB" />
+      <rect x="28" y="20" width="8" height="30" rx="4" fill="#ECEFF4" />
+      <path d="M43 38L47 42L54 34" fill="none" stroke="#D08770" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function formUiStatus(form: StoredForm) {
   if (form.status === "draft") return "draft";
   if (form.schema && schemaFingerprint(form.schema) !== schemaFingerprint(form.draftSchema)) return "dirty";
@@ -317,17 +606,6 @@ function formStatusLabel(form: StoredForm) {
   const status = formUiStatus(form);
   if (status === "dirty") return "Unpublished edits";
   return status === "published" ? "Published" : "Draft";
-}
-
-function responseCount(formId: string) {
-  return getSubmissions(formId).length;
-}
-
-function lastSubmissionAt(formId: string) {
-  const dates = getSubmissions(formId)
-    .map((submission) => submission.createdAt)
-    .sort();
-  return dates[dates.length - 1];
 }
 
 type Theme = "light" | "dark";
@@ -359,8 +637,13 @@ function useTestnetWalletGuard() {
   return useContext(TestnetWalletContext);
 }
 
-function useDropdownPosition(triggerRef: React.RefObject<HTMLElement | null>, isOpen: boolean) {
-  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+function useDropdownPosition(
+  triggerRef: React.RefObject<HTMLElement | null>,
+  isOpen: boolean,
+  menuRef?: React.RefObject<HTMLElement | null>,
+  estimatedHeight = 280,
+) {
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0, maxHeight: 320, placement: "bottom" as "top" | "bottom" });
   useEffect(() => {
     if (!isOpen || !triggerRef.current) return;
     let raf = 0;
@@ -370,18 +653,33 @@ function useDropdownPosition(triggerRef: React.RefObject<HTMLElement | null>, is
         const el = triggerRef.current;
         if (!el) return;
         const rect = el.getBoundingClientRect();
-        setPos({ top: rect.bottom + 6, left: rect.left, width: rect.width });
+        const gap = 6;
+        const margin = 12;
+        const menuHeight = menuRef?.current?.offsetHeight || estimatedHeight;
+        const spaceBelow = window.innerHeight - rect.bottom - margin;
+        const spaceAbove = rect.top - margin;
+        const placement = spaceBelow >= menuHeight || spaceBelow >= spaceAbove ? "bottom" : "top";
+        const available = Math.max(120, (placement === "bottom" ? spaceBelow : spaceAbove) - gap);
+        const height = Math.min(menuHeight, available);
+        const width = rect.width;
+        const left = Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin));
+        const top = placement === "bottom"
+          ? rect.bottom + gap
+          : Math.max(margin, rect.top - height - gap);
+        setPos({ top, left, width, maxHeight: available, placement });
       });
     }
     update();
+    const timer = window.setTimeout(update, 0);
     window.addEventListener("scroll", update, true);
     window.addEventListener("resize", update);
     return () => {
       cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
       window.removeEventListener("scroll", update, true);
       window.removeEventListener("resize", update);
     };
-  }, [isOpen, triggerRef]);
+  }, [estimatedHeight, isOpen, menuRef, triggerRef]);
   return pos;
 }
 
@@ -638,8 +936,12 @@ function TopBar({ navigate, path }: { navigate: (path: string) => void; path: st
 
   return (
     <header className="topbar">
-      <button className="topbar-link topbar-home-link" onClick={() => navigate("/")}>
-        TuskD
+      <button className="brand topbar-home-link" onClick={() => navigate("/")}>
+        <TuskDMark className="brand-mark" />
+        <span className="brand-text">
+          <strong>TuskD</strong>
+          <small>Forms</small>
+        </span>
       </button>
       <div className="topbar-actions">
         {path !== "/forms" && (
@@ -678,10 +980,12 @@ function LandingPage({ navigate }: { navigate: (path: string) => void }) {
           transition={{ duration: 0.35 }}
         >
           <p className="landing-kicker">
-            <Wallet size={14} />
+            <TuskDMark className="landing-kicker-mark" />
             Sui + Walrus
           </p>
-          <h1>TuskD</h1>
+          <div className="landing-logo-lockup">
+            <h1>TuskD</h1>
+          </div>
           <p className="landing-lede">
             Build forms, collect media-rich responses, and keep publish and submit actions verifiable on testnet.
           </p>
@@ -750,7 +1054,7 @@ function LandingPage({ navigate }: { navigate: (path: string) => void }) {
                   <div className="landing-form-mode-preview">
                     <div className="landing-form-mode-meta">
                       <span>3 questions</span>
-                      <span>Powered by TuskD</span>
+                      <span><TuskDMark className="inline-brand-mark" /> Powered by TuskD</span>
                     </div>
                     <div className="landing-form-mode-question">
                       <small>01</small>
@@ -893,15 +1197,20 @@ function FormControls() {
 
 function FormsHome({ navigate }: { navigate: (path: string) => void }) {
   const [forms, setForms] = useState(() => getForms());
+  const [recentResponses, setRecentResponses] = useState<RecentResponse[]>(() => recentResponsesForForms(getForms()));
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "draft" | "published">("all");
   const [copiedId, setCopiedId] = useState("");
   const [syncingForms, setSyncingForms] = useState(false);
+  const [syncingResponses, setSyncingResponses] = useState(false);
+  const [recentOpen, setRecentOpen] = useState(false);
   const account = useCurrentAccount();
   const suiClient = useSuiClient();
 
   useEffect(() => {
-    setForms(getForms());
+    const nextForms = getForms();
+    setForms(nextForms);
+    setRecentResponses(recentResponsesForForms(nextForms));
   }, []);
 
   useEffect(() => {
@@ -929,7 +1238,9 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
         }
 
         if (changed && !cancelled) {
-          setForms(getForms());
+          const nextForms = getForms();
+          setForms(nextForms);
+          setRecentResponses(recentResponsesForForms(nextForms));
         }
       } catch {
         if (!cancelled) toast.error("Unable to sync forms from Sui right now.");
@@ -944,6 +1255,41 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
     };
   }, [account?.address, suiClient]);
 
+  useEffect(() => {
+    if (!forms.length) {
+      setRecentResponses([]);
+      return;
+    }
+
+    setRecentResponses(recentResponsesForForms(forms));
+    const publishedForms = forms.filter((form) => form.status === "published" && formObjectId(form));
+    if (!publishedForms.length) return;
+
+    let cancelled = false;
+    async function syncRecentResponses() {
+      setSyncingResponses(true);
+      try {
+        const remoteSubmissions = await fetchRecentSubmissionsForFormsFromSui(publishedForms, suiClient, 5);
+        if (cancelled) return;
+        for (const submission of remoteSubmissions) {
+          const form = publishedForms.find((item) => item.id === submission.formId);
+          if (!form) continue;
+          saveSubmission(mergeExistingReviewState(form, submission));
+        }
+        if (!cancelled) setRecentResponses(recentResponsesForForms(getForms()));
+      } catch {
+        if (!cancelled) toast.error("Unable to sync recent responses from Sui right now.");
+      } finally {
+        if (!cancelled) setSyncingResponses(false);
+      }
+    }
+
+    syncRecentResponses();
+    return () => {
+      cancelled = true;
+    };
+  }, [forms, suiClient]);
+
   const filteredForms = useMemo(() => {
     return forms.filter((form) => {
       const status = formUiStatus(form);
@@ -956,9 +1302,9 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
   const stats = useMemo(() => {
     const published = forms.filter((f) => formUiStatus(f) === "published").length;
     const drafts = forms.filter((f) => { const s = formUiStatus(f); return s === "draft" || s === "dirty"; }).length;
-    const totalResponses = forms.reduce((sum, f) => sum + responseCount(f.id), 0);
+    const totalResponses = forms.reduce((sum, f) => sum + responseCount(f), 0);
     return { total: forms.length, published, drafts, totalResponses };
-  }, [forms]);
+  }, [forms, recentResponses]);
 
   function newForm() {
     if (!account?.address) {
@@ -1023,6 +1369,56 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
         </div>
       )}
 
+      {forms.length > 0 && (
+        <section className={`recent-responses-panel ${recentOpen ? "open" : ""}`} aria-label="Recent responses">
+          <button className="recent-responses-header" onClick={() => setRecentOpen((open) => !open)} aria-expanded={recentOpen}>
+            <div>
+              <h2>Recent responses</h2>
+              <p>
+                {syncingResponses
+                  ? "Syncing latest Sui events..."
+                  : recentResponses.length
+                    ? `${recentResponses.length} latest across all forms`
+                    : "No responses yet"}
+              </p>
+            </div>
+            <div className="recent-responses-summary">
+              {recentResponses[0] && (
+                <span>{recentResponses[0].form.draftSchema.title || "Untitled form"}</span>
+              )}
+              <ChevronDown size={16} />
+            </div>
+          </button>
+          {recentOpen && (
+            recentResponses.length ? (
+              <div className="recent-responses-list">
+                {recentResponses.map(({ form, submission }) => (
+                  <button
+                    key={`${submission.formId}-${submission.id}`}
+                    className="recent-response-row"
+                    onClick={() => navigate(`/admin/${form.id}`)}
+                  >
+                    <span className="recent-response-form">
+                      <strong>{form.draftSchema.title || "Untitled form"}</strong>
+                      <small>{new Date(submission.createdAt).toLocaleString()}</small>
+                    </span>
+                    <span className="recent-response-submission">
+                      <strong>{responsePreview(form, submission)}</strong>
+                      <small>{submission.submitter ? shortAddress(submission.submitter) : "Unknown submitter"}</small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="recent-responses-empty">
+                <MessageSquareText size={18} />
+                <span>{syncingResponses ? "Looking for recent submissions..." : "No responses yet."}</span>
+              </div>
+            )
+          )}
+        </section>
+      )}
+
       <div className="forms-home-toolbar">
         <div className="search-box">
           <Search size={16} />
@@ -1072,8 +1468,8 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
       <div className="forms-grid">
         {filteredForms.map((form) => {
           const status = formUiStatus(form);
-          const count = responseCount(form.id);
-          const lastAt = lastSubmissionAt(form.id);
+          const count = responseCount(form);
+          const lastAt = lastSubmissionAt(form);
           return (
             <article className="form-card" key={form.id}>
               <div className="form-card-header">
@@ -1131,7 +1527,10 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [addModalIndex, setAddModalIndex] = useState(0);
   const [mobileEditorOpen, setMobileEditorOpen] = useState(false);
+  const [scrollTargetId, setScrollTargetId] = useState("");
   const canvasRef = useRef<HTMLDivElement>(null);
+  const formTitleRef = useRef<HTMLInputElement>(null);
+  const titleFocusedRef = useRef("");
   const isMobile = useMediaQuery("(max-width: 767px)");
   const account = useCurrentAccount();
   const suiClient = useSuiClient();
@@ -1202,6 +1601,21 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
     if (!form) return;
     setForm(saveDraftForm(form.id, schema, form.owner));
   }, [schema]);
+
+  useEffect(() => {
+    if (!form || activeTab !== "build" || titleFocusedRef.current === form.id) return;
+    const timer = window.setTimeout(() => {
+      const input = formTitleRef.current;
+      if (!input) return;
+      const scrollX = window.scrollX;
+      const scrollY = window.scrollY;
+      input.focus({ preventScroll: true });
+      input.select();
+      requestAnimationFrame(() => window.scrollTo(scrollX, scrollY));
+      titleFocusedRef.current = form.id;
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [activeTab, form?.id]);
 
   // Beforeunload guard for unsaved changes
   useEffect(() => {
@@ -1277,6 +1691,18 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
       return { ...current, fields };
     });
     setSelectedId(copyField.id);
+    setScrollTargetId(copyField.id);
+  }
+
+  function discardChanges() {
+    if (!form?.schema || !dirtySincePublish) return;
+    const confirmed = window.confirm("Discard unpublished edits and restore the currently published version?");
+    if (!confirmed) return;
+    setSchema(form.schema);
+    setSelectedId((current) => form.schema?.fields.some((field) => field.id === current) ? current : form.schema?.fields[0]?.id ?? "");
+    setScrollTargetId("");
+    setForm(saveDraftForm(form.id, form.schema, form.owner));
+    toast.success("Unpublished edits discarded");
   }
 
   async function publish() {
@@ -1346,23 +1772,27 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
   return (
     <div className="builder-container">
       <header className="builder-header">
-        <div className="builder-header-left">
-          <button onClick={() => navigate("/forms")} className="back-btn"><ArrowLeft size={18}/></button>
-          <div className="builder-title-group">
-            <input className="builder-title" value={schema.title} onChange={e => setSchema({...schema, title: e.target.value})} placeholder="Form Title" />
-            <span className={`save-status ${dirtySincePublish ? 'dirty' : ''}`}>{dirtySincePublish ? "Unsaved edits" : "Saved"}</span>
-          </div>
-        </div>
+        <button onClick={() => navigate("/forms")} className="back-btn builder-back-btn" aria-label="Back to workspace"><ArrowLeft size={18}/></button>
         <div className="builder-tabs" role="tablist" aria-label="Builder tabs">
           <button role="tab" aria-selected={activeTab === "build"} className={activeTab === "build" ? "active" : ""} onClick={() => setActiveTab("build")}>Build</button>
           <button role="tab" aria-selected={activeTab === "settings"} className={activeTab === "settings" ? "active" : ""} onClick={() => setActiveTab("settings")}>Settings</button>
           <button role="tab" aria-selected={activeTab === "preview"} className={activeTab === "preview" ? "active" : ""} onClick={() => setActiveTab("preview")}>Preview</button>
         </div>
         <div className="builder-header-right">
+          {dirtySincePublish && (
+            <button className="secondary discard-changes-btn" onClick={discardChanges}>
+              <X size={15}/> Discard
+            </button>
+          )}
           {form?.status === "published" && (
-             <button className="secondary" onClick={copyShareLink}>
-               {copied ? <Check size={15}/> : <LinkIcon size={15}/>} Share
-             </button>
+            <>
+              <button className="secondary" onClick={() => navigate(`/admin/${form.id}`)}>
+                <BarChart3 size={15}/> Responses
+              </button>
+              <button className="secondary" onClick={copyShareLink}>
+                {copied ? <Check size={15}/> : <LinkIcon size={15}/>} Share
+              </button>
+            </>
           )}
           <button className="primary" onClick={publish} disabled={busy || schemaIssues.length > 0}>
              {busy ? <><Loader2 size={15} className="spin" /> Publishing</> : (form?.status === "published" && !dirtySincePublish ? "Published" : "Publish")}
@@ -1381,6 +1811,10 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
               transition={{ duration: 0.15 }}
               className="builder-canvas"
             >
+              <div className="builder-form-meta">
+                <input ref={formTitleRef} className="builder-title" value={schema.title} onChange={e => setSchema({...schema, title: e.target.value})} placeholder="Form title" />
+                <span className={`save-status ${dirtySincePublish ? 'dirty' : ''}`}>{dirtySincePublish ? "Unsaved edits" : "Saved"}</span>
+              </div>
               <textarea className="builder-desc" value={schema.description} onChange={e => setSchema({...schema, description: e.target.value})} placeholder="Form description or instructions..." />
               
               {schema.fields.length === 0 ? (
@@ -1409,6 +1843,8 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
                           onRemove={() => removeField(field.id)}
                           onDuplicate={() => duplicateField(field.id)}
                           issue={issueByField.get(field.id)}
+                          scrollIntoView={scrollTargetId === field.id}
+                          onScrolled={() => setScrollTargetId("")}
                         />
                       </React.Fragment>
                     ))}
@@ -1456,7 +1892,7 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
                   <h2>Fix before publishing</h2>
                   <div className="issue-list" style={{marginTop: 12}}>
                     {schemaIssues.map((issue) => (
-                      <button key={`${issue.fieldId ?? "form"}-${issue.message}`} onClick={() => { setActiveTab("build"); if (issue.fieldId) setSelectedId(issue.fieldId); }}>
+                      <button key={`${issue.fieldId ?? "form"}-${issue.message}`} onClick={() => { setActiveTab("build"); if (issue.fieldId) { setSelectedId(issue.fieldId); setScrollTargetId(issue.fieldId); } }}>
                         <AlertCircle size={14} />
                         {issue.message}
                       </button>
@@ -1559,6 +1995,8 @@ function SortableField({
   index,
   isSelected,
   issue,
+  scrollIntoView,
+  onScrolled,
   onSelect,
   onUpdate,
   onRemove,
@@ -1568,6 +2006,8 @@ function SortableField({
   index: number;
   isSelected: boolean;
   issue?: string[];
+  scrollIntoView?: boolean;
+  onScrolled?: () => void;
   onSelect: () => void;
   onUpdate: (patch: Partial<Field>) => void;
   onRemove: () => void;
@@ -1581,17 +2021,13 @@ function SortableField({
   };
 
   const contentRef = useRef<HTMLDivElement>(null);
-  const hasScrolledRef = useRef(false);
 
   useEffect(() => {
-    if (isSelected && contentRef.current && !hasScrolledRef.current) {
-      hasScrolledRef.current = true;
+    if (scrollIntoView && contentRef.current) {
       contentRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+      onScrolled?.();
     }
-    if (!isSelected) {
-      hasScrolledRef.current = false;
-    }
-  }, [isSelected]);
+  }, [onScrolled, scrollIntoView]);
 
   return (
     <div ref={setNodeRef} style={style} id={`field-${field.id}`}>
@@ -1640,7 +2076,6 @@ function SortableField({
                   value={field.label} 
                   onChange={e => onUpdate({label: e.target.value})} 
                   placeholder="Question..." 
-                  autoFocus
                 />
                 <textarea 
                   className="field-card-desc-input"
@@ -1684,7 +2119,7 @@ function FieldEditorInline({ field, updateField }: { field: Field, updateField: 
   const [selectOpen, setSelectOpen] = useState(false);
   const selectRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const dropdownPos = useDropdownPosition(selectRef, selectOpen);
+  const dropdownPos = useDropdownPosition(selectRef, selectOpen, menuRef, 320);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -1718,7 +2153,7 @@ function FieldEditorInline({ field, updateField }: { field: Field, updateField: 
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.12 }}
                 className="field-custom-select-dropdown"
-                style={{ position: "absolute", top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width }}
+                style={{ position: "absolute", top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width, maxHeight: dropdownPos.maxHeight }}
               >
                 {fieldTypes.map(item => (
                   <button
@@ -2146,7 +2581,7 @@ function PublicFormLoaded({ form, formId, navigate }: { form: StoredForm; formId
   }, [activeStep, isSlides]);
 
   if (receipt) {
-    return <PublicFormSuccess receipt={receipt} formId={activeForm.id} navigate={navigate} />;
+    return <PublicFormSuccess receipt={receipt} />;
   }
 
   return (
@@ -2272,7 +2707,7 @@ function PublicFormLoaded({ form, formId, navigate }: { form: StoredForm; formId
           className="walrus-pill"
           onClick={() => navigate("/")}
         >
-          <Lock size={10} strokeWidth={2.5} />
+          <TuskDMark className="pill-brand-mark" />
           <span className="walrus-pill-label">Powered by TuskD</span>
         </button>
       </footer>
@@ -2280,7 +2715,7 @@ function PublicFormLoaded({ form, formId, navigate }: { form: StoredForm; formId
   );
 }
 
-function PublicFormSuccess({ receipt, formId, navigate }: { receipt: Submission; formId: string; navigate: (path: string) => void }) {
+function PublicFormSuccess({ receipt }: { receipt: Submission }) {
   return (
     <section className="public-success-page">
       <motion.div
@@ -2297,9 +2732,6 @@ function PublicFormSuccess({ receipt, formId, navigate }: { receipt: Submission;
         <div className="typeform-success-actions">
           <button className="typeform-ok" onClick={() => window.location.reload()}>
             Submit another
-          </button>
-          <button className="typeform-ok secondary" onClick={() => navigate(`/admin/${formId}`)}>
-            View responses
           </button>
         </div>
         <div className="typeform-success-proof">
@@ -2491,14 +2923,18 @@ function AutoResizeTextarea({ value, onChange, placeholder }: { value: string; o
 }
 
 function Dashboard({ formId, navigate }: { formId: string; navigate: (path: string) => void }) {
-  const [form] = useState(() => getForm(formId));
-  const [submissions, setSubmissions] = useState(() => getSubmissions(formId));
+  const initialForm = getForm(formId);
+  const [form, setForm] = useState<StoredForm | null>(() => initialForm);
+  const [loadingForm, setLoadingForm] = useState(() => !initialForm && !isLocalFormId(formId));
+  const [loadError, setLoadError] = useState("");
+  const [submissions, setSubmissions] = useState(() => (initialForm ? getStoredSubmissionsForForm(initialForm) : getSubmissions(formId)));
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [priority, setPriority] = useState("all");
   const [viewType, setViewType] = useState<"grid" | "table">("table");
   const [pendingReviewPatches, setPendingReviewPatches] = useState<Record<string, SubmissionReviewPatch>>({});
   const [savingReviewChanges, setSavingReviewChanges] = useState(false);
+  const [syncingSubmissions, setSyncingSubmissions] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [priorityOpen, setPriorityOpen] = useState(false);
   const statusRef = useRef<HTMLButtonElement>(null);
@@ -2508,8 +2944,90 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
   const statusPos = useDropdownPosition(statusRef, statusOpen);
   const priorityPos = useDropdownPosition(priorityRef, priorityOpen);
   const account = useCurrentAccount();
+  const suiClient = useSuiClient();
   const signAndExecute = useSignAndExecuteTransaction();
   const { ensureTestnetWallet } = useTestnetWalletGuard();
+
+  useEffect(() => {
+    let cancelled = false;
+    const current = getForm(formId);
+    if (current) {
+      setForm(current);
+      setSubmissions(getStoredSubmissionsForForm(current));
+      setLoadingForm(false);
+      setLoadError("");
+      return;
+    }
+
+    const currentByObjectId = getForms().find((item) => item.suiObjectId?.toLowerCase() === formId.toLowerCase());
+    if (currentByObjectId) {
+      setForm(currentByObjectId);
+      setSubmissions(getStoredSubmissionsForForm(currentByObjectId));
+      setLoadingForm(false);
+      setLoadError("");
+      return;
+    }
+
+    if (isLocalFormId(formId)) {
+      setForm(null);
+      setSubmissions([]);
+      setLoadingForm(false);
+      setLoadError("");
+      return;
+    }
+
+    async function loadRemoteForm() {
+      setLoadingForm(true);
+      setLoadError("");
+      try {
+        const remoteForm = await fetchPublishedFormFromSui(formId, suiClient);
+        if (cancelled) return;
+        saveForm(remoteForm);
+        setForm(remoteForm);
+        setSubmissions(getStoredSubmissionsForForm(remoteForm));
+      } catch (error) {
+        if (!cancelled) {
+          setForm(null);
+          setSubmissions([]);
+          setLoadError(error instanceof Error ? error.message : "Unable to load this form from Sui.");
+        }
+      } finally {
+        if (!cancelled) setLoadingForm(false);
+      }
+    }
+
+    loadRemoteForm();
+    return () => {
+      cancelled = true;
+    };
+  }, [formId, suiClient]);
+
+  useEffect(() => {
+    if (!form || form.status !== "published" || !formObjectId(form)) return;
+    const activeForm = form;
+    let cancelled = false;
+
+    async function syncSubmissions() {
+      setSyncingSubmissions(true);
+      try {
+        const remoteSubmissions = await fetchSubmissionsForFormFromSui(activeForm, suiClient);
+        if (cancelled) return;
+        for (const submission of remoteSubmissions) {
+          saveSubmission(submission);
+        }
+        setSubmissions(getStoredSubmissionsForForm(activeForm));
+      } catch {
+        if (!cancelled) toast.error("Unable to sync responses from Sui right now.");
+      } finally {
+        if (!cancelled) setSyncingSubmissions(false);
+      }
+    }
+
+    syncSubmissions();
+    return () => {
+      cancelled = true;
+    };
+  }, [form?.id, form?.suiObjectId, form?.status, suiClient]);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -2557,10 +3075,21 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
     return { total, newCount, reviewed, withMedia };
   }, [displaySubmissions]);
 
+  if (loadingForm) {
+    return (
+      <section className="center-state">
+        <Loader2 size={28} className="spin" />
+        <h1>Loading responses</h1>
+        <p className="muted">Fetching the form and response events from Sui.</p>
+      </section>
+    );
+  }
+
   if (!form) {
     return (
       <section className="center-state">
         <h1>No form found</h1>
+        {loadError && <p className="muted">{loadError}</p>}
         <button className="primary" onClick={() => navigate("/forms")}>Back to workspace</button>
       </section>
     );
@@ -2637,7 +3166,7 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
       for (const { next } of pendingReviewUpdates) {
         updateSubmission(next);
       }
-      setSubmissions(getSubmissions(formId));
+      setSubmissions(getStoredSubmissionsForForm(activeForm));
       setPendingReviewPatches({});
       toast.success(`${pendingReviewUpdates.length} response${pendingReviewUpdates.length === 1 ? "" : "s"} updated on Sui Testnet`);
     } catch (error) {
@@ -2679,7 +3208,15 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
         </button>
         <div className="dashboard-title-group">
           <h1>{adminSchema.title}</h1>
-          <p className="muted">{submissions.length} submission{submissions.length === 1 ? "" : "s"} &middot; {adminSchema.fields.length} question{adminSchema.fields.length === 1 ? "" : "s"}</p>
+          <p className="muted">
+            {syncingSubmissions ? (
+              "Syncing responses..."
+            ) : (
+              <>
+                {submissions.length} submission{submissions.length === 1 ? "" : "s"} &middot; {adminSchema.fields.length} question{adminSchema.fields.length === 1 ? "" : "s"}
+              </>
+            )}
+          </p>
         </div>
         <div className="dashboard-header-actions">
           <button className="secondary" onClick={() => navigate(publicFormPath(activeForm))}>
