@@ -2463,17 +2463,11 @@ function PublicFormLoaded({ form, formId, navigate }: { form: StoredForm; formId
   const publishedSchema = activeForm.schema;
   const activeSchema = publishedSchema!;
   const isSlides = activeSchema.layout === "slides";
-  const currentField = activeSchema.fields[activeStep];
   const totalFields = activeSchema.fields.length;
+  const totalSlides = isSlides ? totalFields + 1 : totalFields;
+  const isIntroSlide = isSlides && activeStep === 0;
+  const currentField = isSlides ? activeSchema.fields[activeStep - 1] : activeSchema.fields[activeStep];
   const requiredCount = activeSchema.fields.filter((f) => f.required).length;
-  const requiredAnswered = activeSchema.fields.filter((f) => {
-    if (!f.required) return true;
-    const v = values[f.id];
-    const hasFile = files[f.id];
-    if (f.type === "checkboxes") return Array.isArray(v) && v.length > 0;
-    if (f.type === "image" || f.type === "video") return hasFile;
-    return v !== undefined && v !== "" && v !== 0;
-  }).length;
 
   function validateField(field: Field, value: unknown, file?: File): string {
     const emptyArray = Array.isArray(value) && value.length === 0;
@@ -2500,6 +2494,13 @@ function PublicFormLoaded({ form, formId, navigate }: { form: StoredForm; formId
   }
 
   function handleNext() {
+    if (isIntroSlide) {
+      if (activeStep < totalSlides - 1) {
+        setDirection(1);
+        setActiveStep((s) => s + 1);
+      }
+      return;
+    }
     if (!currentField) return;
     const err = validateField(currentField, values[currentField.id], files[currentField.id]);
     if (err) {
@@ -2507,7 +2508,7 @@ function PublicFormLoaded({ form, formId, navigate }: { form: StoredForm; formId
       return;
     }
     setErrors((prev) => ({ ...prev, [currentField.id]: "" }));
-    if (activeStep < totalFields - 1) {
+    if (activeStep < totalSlides - 1) {
       setDirection(1);
       setActiveStep((s) => s + 1);
     }
@@ -2535,8 +2536,9 @@ function PublicFormLoaded({ form, formId, navigate }: { form: StoredForm; formId
       if (isSlides) {
         const firstErrorIndex = activeSchema.fields.findIndex((f) => nextErrors[f.id]);
         if (firstErrorIndex >= 0) {
-          setDirection(firstErrorIndex > activeStep ? 1 : -1);
-          setActiveStep(firstErrorIndex);
+          const firstErrorStep = firstErrorIndex + 1;
+          setDirection(firstErrorStep > activeStep ? 1 : -1);
+          setActiveStep(firstErrorStep);
         }
       } else {
         const firstErrorField = activeSchema.fields.find((f) => nextErrors[f.id]);
@@ -2616,13 +2618,13 @@ function PublicFormLoaded({ form, formId, navigate }: { form: StoredForm; formId
       if (e.key === "Enter" && !e.shiftKey && e.target instanceof HTMLTextAreaElement) return;
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        if (activeStep < totalFields - 1) handleNext();
+        if (activeStep < totalSlides - 1) handleNext();
         else handleSubmit();
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeStep, values, files, activeSchema, isSlides, totalFields]);
+  }, [activeStep, values, files, activeSchema, isSlides, totalSlides]);
 
   // Focus first field on initial load
   useEffect(() => {
@@ -2646,13 +2648,13 @@ function PublicFormLoaded({ form, formId, navigate }: { form: StoredForm; formId
 
   // Focus field on slide change
   useEffect(() => {
-    if (!isSlides) return;
+    if (!isSlides || isIntroSlide) return;
     const timer = setTimeout(() => {
       const el = document.querySelector<HTMLElement>(".slides-question-wrapper .typeform-input, .slides-question-wrapper .typeform-input-area input, .slides-question-wrapper .typeform-input-area textarea");
       if (el) el.focus({ preventScroll: true });
     }, 350);
     return () => clearTimeout(timer);
-  }, [activeStep, isSlides]);
+  }, [activeStep, isSlides, isIntroSlide]);
 
   if (receipt) {
     return <PublicFormSuccess receipt={receipt} />;
@@ -2663,14 +2665,14 @@ function PublicFormLoaded({ form, formId, navigate }: { form: StoredForm; formId
       {/* Step counter pill with nav */}
       <div className="public-form-meta">
         <span className="step-pill">
-          {isSlides ? `${activeStep + 1} / ${totalFields}` : `${activeSchema.fields.length} questions`}
+          {isSlides ? `${activeStep + 1} / ${totalSlides}` : `${activeSchema.fields.length} questions`}
         </span>
-        {isSlides && totalFields > 1 && (
+        {isSlides && totalSlides > 1 && (
           <span className="step-pills-nav">
             <button className="step-pill-nav-btn" onClick={handlePrev} disabled={activeStep === 0} aria-label="Previous">
               <Triangle size={10} fill="currentColor" />
             </button>
-            <button className="step-pill-nav-btn" onClick={handleNext} disabled={activeStep === totalFields - 1} aria-label="Next">
+            <button className="step-pill-nav-btn" onClick={handleNext} disabled={activeStep === totalSlides - 1} aria-label="Next">
               <Triangle size={10} fill="currentColor" style={{ transform: "rotate(180deg)" }} />
             </button>
           </span>
@@ -2679,7 +2681,7 @@ function PublicFormLoaded({ form, formId, navigate }: { form: StoredForm; formId
 
       <main className="public-form-body">
         {isSlides ? (
-          <div className="slides-container">
+          <div className={`slides-container ${isIntroSlide ? "is-intro" : ""}`}>
             <AnimatePresence mode="wait" custom={direction}>
               <motion.div
                 key={activeStep}
@@ -2690,39 +2692,43 @@ function PublicFormLoaded({ form, formId, navigate }: { form: StoredForm; formId
                 transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
                 className="slides-question-wrapper"
               >
-                <TypeformField
-                  field={currentField}
-                  value={values[currentField.id]}
-                  file={files[currentField.id]}
-                  error={errors[currentField.id]}
-                  onValue={(value) => {
-                    setValues((current) => ({ ...current, [currentField.id]: value }));
-                    setErrors((prev) => ({ ...prev, [currentField.id]: "" }));
-                  }}
-                  onFile={(file) => setFiles((current) => ({ ...current, [currentField.id]: file }))}
-                  onClearFile={() =>
-                    setFiles((current) => {
-                      const next = { ...current };
-                      delete next[currentField.id];
-                      return next;
-                    })
-                  }
-                  index={activeStep}
-                />
+                {isIntroSlide ? (
+                  <TypeformIntroSlide schema={activeSchema} requiredCount={requiredCount} totalFields={totalFields} />
+                ) : currentField ? (
+                  <TypeformField
+                    field={currentField}
+                    value={values[currentField.id]}
+                    file={files[currentField.id]}
+                    error={errors[currentField.id]}
+                    onValue={(value) => {
+                      setValues((current) => ({ ...current, [currentField.id]: value }));
+                      setErrors((prev) => ({ ...prev, [currentField.id]: "" }));
+                    }}
+                    onFile={(file) => setFiles((current) => ({ ...current, [currentField.id]: file }))}
+                    onClearFile={() =>
+                      setFiles((current) => {
+                        const next = { ...current };
+                        delete next[currentField.id];
+                        return next;
+                      })
+                    }
+                    index={activeStep - 1}
+                  />
+                ) : null}
               </motion.div>
             </AnimatePresence>
 
             <div className="typeform-nav">
-              {activeStep < totalFields - 1 ? (
+              {activeStep < totalSlides - 1 ? (
                 <button className="typeform-ok" onClick={handleNext}>
-                  OK
+                  {isIntroSlide ? "Start" : "OK"}
                 </button>
               ) : (
                 <button className="typeform-ok submit" onClick={handleSubmit} disabled={busy}>
                   {busy ? <Loader2 size={18} className="spin" /> : "Submit"}
                 </button>
               )}
-              {activeStep < totalFields - 1 && (
+              {activeStep < totalSlides - 1 && (
                 <span className="typeform-hint">
                   press <kbd>Enter</kbd> ↵
                 </span>
@@ -2786,6 +2792,21 @@ function PublicFormLoaded({ form, formId, navigate }: { form: StoredForm; formId
         </button>
       </footer>
     </div>
+  );
+}
+
+function TypeformIntroSlide({ schema, totalFields, requiredCount }: { schema: FormSchema; totalFields: number; requiredCount: number }) {
+  const description = schema.description.trim();
+
+  return (
+    <section className="typeform-intro-slide" aria-labelledby="public-form-title">
+      <h1 id="public-form-title">{schema.title || "Untitled form"}</h1>
+      {description ? <p>{description}</p> : null}
+      <div className="typeform-intro-meta">
+        <span>{totalFields} question{totalFields === 1 ? "" : "s"}</span>
+        {requiredCount > 0 && <span>{requiredCount} required</span>}
+      </div>
+    </section>
   );
 }
 

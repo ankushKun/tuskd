@@ -4338,6 +4338,49 @@ h2 {
 .slides-question-wrapper {
   width: 100%;
 }
+.slides-container.is-intro .typeform-nav {
+  margin-left: 0;
+}
+.typeform-intro-slide {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 720px;
+  padding: 32px 0;
+}
+.typeform-intro-slide h1 {
+  margin: 0;
+  color: var(--fg);
+  font-size: 46px;
+  font-weight: 600;
+  line-height: 1.08;
+  letter-spacing: 0;
+}
+.typeform-intro-slide p {
+  margin: 0;
+  max-width: 640px;
+  color: var(--fg-muted);
+  font-size: 19px;
+  line-height: 1.55;
+}
+.typeform-intro-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+.typeform-intro-meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 6px 11px;
+  border-radius: var(--radius-full);
+  background: var(--bg-accent);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
 
 /* List Layout */
 .list-container {
@@ -5099,6 +5142,23 @@ button.form-control-pill {
     line-height: 1.18;
     letter-spacing: 0;
     overflow-wrap: anywhere;
+  }
+  .typeform-intro-slide {
+    gap: 14px;
+    padding: 26px 0;
+  }
+  .typeform-intro-slide h1 {
+    font-size: 34px;
+    line-height: 1.12;
+    overflow-wrap: anywhere;
+  }
+  .typeform-intro-slide p {
+    font-size: 16px;
+    line-height: 1.48;
+  }
+  .typeform-intro-meta span {
+    min-height: 28px;
+    font-size: 12px;
   }
   .typeform-helper {
     margin: -2px 0 0 38px;
