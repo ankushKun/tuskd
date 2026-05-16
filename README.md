@@ -9,6 +9,12 @@
 
 TuskD is a wallet-native form platform for collecting structured responses, files, and review signals on Walrus and Sui Testnet. Creators build and publish forms, respondents submit through a public link, and each publish/submit/status update is backed by a real wallet-signed Sui transaction.
 
+## Demo
+
+<video src="assets/tuskd-demo.mp4" controls width="100%">
+  <a href="assets/tuskd-demo.mp4">Watch the TuskD demo video</a>
+</video>
+
 ## Features
 
 - Sui wallet connection through `@mysten/dapp-kit`.
