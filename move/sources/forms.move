@@ -31,6 +31,12 @@ module tuskd::forms {
         schema_blob_id: String,
     }
 
+    public struct FormAccessEvent has copy, drop {
+        form_id: object::ID,
+        owner: address,
+        admins: vector<address>,
+    }
+
     public struct StatusEvent has copy, drop {
         form_id: object::ID,
         submission_id: u64,
@@ -54,6 +60,12 @@ module tuskd::forms {
             admins,
             submission_count: 0,
         };
+
+        event::emit(FormAccessEvent {
+            form_id: object::id(&form),
+            owner: tx_context::sender(ctx),
+            admins,
+        });
 
         transfer::share_object(form);
     }
@@ -80,6 +92,12 @@ module tuskd::forms {
             title,
             description,
             schema_blob_id,
+        });
+
+        event::emit(FormAccessEvent {
+            form_id: object::id(form),
+            owner: form.owner,
+            admins,
         });
     }
 

@@ -30,7 +30,18 @@ export function writeStore(store: AppStore) {
 
 export function saveForm(form: StoredForm) {
   const store = readStore();
-  writeStore({ ...store, forms: [form, ...store.forms.filter((item) => item.id !== form.id)] });
+  const existing = store.forms.find((item) => isSameForm(item, form));
+  const nextForm = existing
+    ? {
+        ...form,
+        id: existing.id,
+        txDigest: form.txDigest ?? existing.txDigest,
+        archivedFields: form.archivedFields ?? existing.archivedFields,
+        createdAt: existing.createdAt,
+        publishedAt: existing.publishedAt ?? form.publishedAt,
+      }
+    : form;
+  writeStore({ ...store, forms: [nextForm, ...store.forms.filter((item) => !isSameForm(item, nextForm))] });
 }
 
 export function getForms() {
@@ -76,10 +87,12 @@ export function saveDraftForm(formId: string, schema: FormSchema, owner: string)
 
 export function deleteForm(formId: string) {
   const store = readStore();
+  const existing = store.forms.find((form) => formIdentityValues(form).includes(formId.toLowerCase()));
+  const ids = new Set([formId.toLowerCase(), ...(existing ? formIdentityValues(existing) : [])]);
   writeStore({
     ...store,
-    forms: store.forms.filter((form) => form.id !== formId),
-    submissions: store.submissions.filter((sub) => sub.formId !== formId)
+    forms: store.forms.filter((form) => !formIdentityValues(form).some((idValue) => ids.has(idValue))),
+    submissions: store.submissions.filter((sub) => !ids.has(sub.formId.toLowerCase()))
   });
 }
 
@@ -105,7 +118,7 @@ export function publishStoredForm(formId: string, schema: FormSchema, schemaBlob
     updatedAt: now,
     publishedAt: existing?.publishedAt ?? now,
   };
-  writeStore({ ...store, forms: [form, ...store.forms.filter((item) => item.id !== formId)] });
+  writeStore({ ...store, forms: [form, ...store.forms.filter((item) => !isSameForm(item, form))] });
   return form;
 }
 
@@ -143,7 +156,8 @@ export function updateSubmission(next: Submission) {
 }
 
 export function getForm(formId: string) {
-  return readStore().forms.find((form) => form.id === formId) ?? null;
+  const normalized = formId.toLowerCase();
+  return readStore().forms.find((form) => formIdentityValues(form).includes(normalized)) ?? null;
 }
 
 export function getSubmissions(formId: string, ...aliases: Array<string | undefined>) {
@@ -160,6 +174,15 @@ function isSameSubmission(a: Submission, b: Submission) {
       a.chainSubmissionId === b.chainSubmissionId &&
       a.formId.toLowerCase() === b.formId.toLowerCase(),
   );
+}
+
+function formIdentityValues(form: Pick<StoredForm, "id" | "suiObjectId">) {
+  return [form.id, form.suiObjectId].filter(Boolean).map((value) => value!.toLowerCase());
+}
+
+function isSameForm(a: Pick<StoredForm, "id" | "suiObjectId">, b: Pick<StoredForm, "id" | "suiObjectId">) {
+  const aIds = new Set(formIdentityValues(a));
+  return formIdentityValues(b).some((value) => aIds.has(value));
 }
 
 function migrateStore(value: unknown): AppStore {

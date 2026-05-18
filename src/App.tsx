@@ -181,12 +181,19 @@ function contractTarget(functionName: "create_form" | "update_form" | "submit" |
   return `${TESTNET_CONFIG.tuskdPackageId}::forms::${functionName}`;
 }
 
-function contractTypeTarget(name: "Form" | "SubmissionEvent" | "StatusEvent") {
+function contractTypeTarget(name: "Form" | "SubmissionEvent" | "StatusEvent" | "FormAccessEvent") {
   const packageId = TESTNET_CONFIG.tuskdTypePackageId || TESTNET_CONFIG.tuskdPackageId;
   if (!packageId) {
     throw new Error("Set VITE_TUSKD_PACKAGE_ID to your published Sui Testnet package ID.");
   }
   return `${packageId}::forms::${name}`;
+}
+
+function contractImplementationTypeTarget(name: "FormAccessEvent") {
+  if (!TESTNET_CONFIG.tuskdPackageId) {
+    throw new Error("Set VITE_TUSKD_PACKAGE_ID to your published Sui Testnet package ID.");
+  }
+  return `${TESTNET_CONFIG.tuskdPackageId}::forms::${name}`;
 }
 
 function findCreatedFormObjectId(tx: unknown) {
@@ -250,6 +257,19 @@ function canAdministerForm(form: StoredForm, address: string | undefined) {
 
 function parseAdminInput(value: string) {
   return normalizeAdminAddresses(value.split(/[\s,]+/));
+}
+
+function formIsVisibleToAccount(form: StoredForm, address: string | undefined) {
+  if (!address) return false;
+  return canAdministerForm(form, address);
+}
+
+function getFormsForAccount(address: string | undefined) {
+  return getForms().filter((form) => formIsVisibleToAccount(form, address));
+}
+
+function extractSuiObjectId(value: string) {
+  return value.match(/0x[0-9a-fA-F]{64}/)?.[0].toLowerCase() ?? "";
 }
 
 async function fetchPublishedFormFromSui(formObjectId: string, suiClient: ReturnType<typeof useSuiClient>): Promise<StoredForm> {
@@ -350,6 +370,55 @@ async function fetchCreatedFormsForOwner(owner: string, suiClient: ReturnType<ty
   return forms;
 }
 
+async function fetchIndexedFormsForAccount(address: string, suiClient: ReturnType<typeof useSuiClient>) {
+  if (!TESTNET_CONFIG.tuskdPackageId) return [];
+  const normalized = address.toLowerCase();
+  const forms: StoredForm[] = [];
+  const seen = new Set<string>();
+
+  for (const eventType of formAccessEventTypes()) {
+    let cursor: { txDigest: string; eventSeq: string } | null | undefined;
+
+    try {
+      for (let page = 0; page < 10; page += 1) {
+        const response = await suiClient.queryEvents({
+          query: { MoveEventType: eventType },
+          cursor,
+          limit: 50,
+          order: "descending",
+        });
+
+        for (const event of response.data as SuiEventLike[]) {
+          const parsed = event.parsedJson as FormAccessEvent;
+          const formId = normalizeObjectId(parsed.form_id);
+          if (!formId || seen.has(formId)) continue;
+
+          const admins = normalizeAdminAddresses(parsed.admins);
+          const owner = (parsed.owner ?? "").toLowerCase();
+          if (owner !== normalized && !admins.includes(normalized)) continue;
+
+          seen.add(formId);
+          try {
+            const form = await fetchPublishedFormFromSui(formId, suiClient);
+            if (canAdministerForm(form, address)) {
+              forms.push({ ...form, txDigest: event.id.txDigest });
+            }
+          } catch {
+            // Ignore stale/deleted objects or blobs that cannot be read.
+          }
+        }
+
+        if (!response.hasNextPage || !response.nextCursor) break;
+        cursor = response.nextCursor;
+      }
+    } catch {
+      // Some RPCs reject an event type until it has been emitted; keep the other candidate type working.
+    }
+  }
+
+  return forms;
+}
+
 const statusCode: Record<Submission["status"], number> = {
   new: 0,
   reviewed: 1,
@@ -398,6 +467,12 @@ type FormStatusEvent = {
   priority?: string | number;
 };
 
+type FormAccessEvent = {
+  form_id?: string;
+  owner?: string;
+  admins?: string[];
+};
+
 type SuiEventLike = {
   id: {
     txDigest: string;
@@ -409,6 +484,10 @@ type SuiEventLike = {
 
 function moveEventType(name: "SubmissionEvent" | "StatusEvent") {
   return contractTypeTarget(name);
+}
+
+function formAccessEventTypes() {
+  return [...new Set([contractTypeTarget("FormAccessEvent"), contractImplementationTypeTarget("FormAccessEvent")])];
 }
 
 function normalizeObjectId(value: string | undefined) {
@@ -1292,52 +1371,52 @@ function FormControls() {
 }
 
 function FormsHome({ navigate }: { navigate: (path: string) => void }) {
-  const [forms, setForms] = useState(() => getForms());
-  const [recentResponses, setRecentResponses] = useState<RecentResponse[]>(() => recentResponsesForForms(getForms()));
+  const [forms, setForms] = useState<StoredForm[]>([]);
+  const [recentResponses, setRecentResponses] = useState<RecentResponse[]>([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "draft" | "published">("all");
   const [copiedId, setCopiedId] = useState("");
   const [syncingForms, setSyncingForms] = useState(false);
   const [syncingResponses, setSyncingResponses] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
+  const [importingForm, setImportingForm] = useState(false);
   const account = useCurrentAccount();
   const suiClient = useSuiClient();
 
   useEffect(() => {
-    const nextForms = getForms();
+    const nextForms = getFormsForAccount(account?.address);
     setForms(nextForms);
     setRecentResponses(recentResponsesForForms(nextForms));
-  }, []);
+    setQuery("");
+    setFilter("all");
+    setRecentOpen(false);
+  }, [account?.address]);
 
   useEffect(() => {
     if (!account?.address) return;
-    const owner = account.address;
+    const address = account.address;
     let cancelled = false;
 
-    async function syncCreatedForms() {
+    async function syncAccessibleForms() {
       setSyncingForms(true);
       try {
-        const remoteForms = await fetchCreatedFormsForOwner(owner, suiClient);
-        if (cancelled || !remoteForms.length) return;
+        const [createdForms, indexedForms] = await Promise.all([
+          fetchCreatedFormsForOwner(address, suiClient),
+          fetchIndexedFormsForAccount(address, suiClient).catch(() => []),
+        ]);
+        const remoteForms = [...createdForms, ...indexedForms];
+        if (cancelled) return;
 
-        const localForms = getForms();
-        const knownIds = new Set(localForms.map((form) => form.id));
-        const knownObjectIds = new Set(localForms.map((form) => form.suiObjectId).filter(Boolean));
         let changed = false;
 
         for (const remoteForm of remoteForms) {
-          if (knownIds.has(remoteForm.id) || knownObjectIds.has(remoteForm.suiObjectId)) continue;
           saveForm(remoteForm);
-          knownIds.add(remoteForm.id);
-          if (remoteForm.suiObjectId) knownObjectIds.add(remoteForm.suiObjectId);
           changed = true;
         }
 
-        if (changed && !cancelled) {
-          const nextForms = getForms();
-          setForms(nextForms);
-          setRecentResponses(recentResponsesForForms(nextForms));
-        }
+        const nextForms = getFormsForAccount(address);
+        if ((changed || nextForms.length !== forms.length) && !cancelled) setForms(nextForms);
+        if (!cancelled) setRecentResponses(recentResponsesForForms(nextForms));
       } catch {
         if (!cancelled) toast.error("Unable to sync forms from Sui right now.");
       } finally {
@@ -1345,11 +1424,11 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
       }
     }
 
-    syncCreatedForms();
+    syncAccessibleForms();
     return () => {
       cancelled = true;
     };
-  }, [account?.address, suiClient]);
+  }, [account?.address, forms.length, suiClient]);
 
   useEffect(() => {
     if (!forms.length) {
@@ -1420,6 +1499,39 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
     navigate(`/builder/${form.id}`);
   }
 
+  async function importPublishedForm() {
+    if (!account?.address) {
+      toast.error("Connect your wallet to import a form.");
+      return;
+    }
+    const value = window.prompt("Paste a published form object ID or form/admin link");
+    if (!value) return;
+    const objectId = extractSuiObjectId(value);
+    if (!objectId) {
+      toast.error("Enter a valid Sui object ID.");
+      return;
+    }
+
+    setImportingForm(true);
+    try {
+      const remoteForm = await fetchPublishedFormFromSui(objectId, suiClient);
+      if (!canAdministerForm(remoteForm, account.address)) {
+        toast.error("This wallet is not the owner or an admin for that form.");
+        return;
+      }
+      saveForm(remoteForm);
+      const nextForms = getFormsForAccount(account.address);
+      setForms(nextForms);
+      setRecentResponses(recentResponsesForForms(nextForms));
+      toast.success("Form imported");
+      navigate(`/admin/${remoteForm.id}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to import this form from Sui.");
+    } finally {
+      setImportingForm(false);
+    }
+  }
+
   function copyFormLink(form: StoredForm) {
     if (form.status !== "published") return;
     copy(`${window.location.origin}${publicFormPath(form)}`);
@@ -1447,6 +1559,10 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
           <button className="secondary" onClick={newSampleForm}>
             <LayoutTemplate size={16} />
             Sample form
+          </button>
+          <button className="secondary" onClick={importPublishedForm} disabled={importingForm}>
+            {importingForm ? <Loader2 size={16} className="spin" /> : <Upload size={16} />}
+            Import form
           </button>
           <button className="primary" onClick={newForm}>
             <Plus size={16} />
@@ -1558,9 +1674,12 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
             <FileText size={32} />
           </div>
           <h2>No forms yet</h2>
-          <p>Create a form, publish it, and start collecting responses on Walrus.</p>
+          <p>Create a form, publish it, or import a form where this wallet is an admin.</p>
           <button className="primary" onClick={newForm}>
             <Plus size={16} /> Create your first form
+          </button>
+          <button className="secondary" onClick={importPublishedForm} disabled={importingForm}>
+            {importingForm ? <Loader2 size={16} className="spin" /> : <Upload size={16} />} Import published form
           </button>
         </motion.div>
       ) : filteredForms.length === 0 ? (
@@ -3203,7 +3322,7 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
   }, [formId, suiClient]);
 
   useEffect(() => {
-    if (!form || form.status !== "published" || !formObjectId(form)) return;
+    if (!form || form.status !== "published" || !formObjectId(form) || !canAdministerForm(form, account?.address)) return;
     const activeForm = form;
     let cancelled = false;
 
@@ -3227,7 +3346,7 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
     return () => {
       cancelled = true;
     };
-  }, [form?.id, form?.suiObjectId, form?.status, suiClient]);
+  }, [account?.address, form?.id, form?.suiObjectId, form?.status, suiClient]);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -3300,6 +3419,28 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
   const canReview = canAdministerForm(activeForm, account?.address);
   const canWriteReview = canReview && (TESTNET_CONFIG.onchainAdmins || activeForm.owner.toLowerCase() === account?.address?.toLowerCase());
   const hasArchivedAnswers = submissions.some((submission) => archivedAnswerFields(activeForm, adminSchema, submission).length > 0);
+
+  if (!account?.address) {
+    return (
+      <section className="center-state">
+        <Wallet size={28} />
+        <h1>Connect admin wallet</h1>
+        <p className="muted">Connect the owner or an assigned admin wallet to review this form.</p>
+        <button className="primary" onClick={() => navigate("/forms")}>Back to workspace</button>
+      </section>
+    );
+  }
+
+  if (!canReview) {
+    return (
+      <section className="center-state">
+        <Lock size={28} />
+        <h1>No admin access</h1>
+        <p className="muted">This wallet is not the owner or an assigned admin for this form.</p>
+        <button className="primary" onClick={() => navigate("/forms")}>Back to workspace</button>
+      </section>
+    );
+  }
 
   if (activeForm.status !== "published" || !activeForm.schema) {
     return (

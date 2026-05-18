@@ -40,9 +40,10 @@ The current Move package has been published to Sui Testnet.
 
 | Item | Value |
 | --- | --- |
-| Package ID | `0xdc26470e395245b9957fad832d7daaacecd2ed03b99024b4e566917cfdbb3058` |
+| Package ID | `0x711e91d13199b760cf674ba44203eda6ebc09b00f82aeb040340a266e4a85270` |
 | Type Package ID | `0xdc26470e395245b9957fad832d7daaacecd2ed03b99024b4e566917cfdbb3058` |
 | Publish Tx | `97sutWfxrEkCbjxeWQ7XPcUZ3ecDqoXCQJit8ofwb8RD` |
+| Latest Upgrade Tx | `3iHkfVYGQ4V9pNLo9X8coBz6wEcb8H9LMJwMDaEgbAkX` |
 | Upgrade Cap | `0xa7ce899614a67bedc892bfbe4b726479fd290d02aabf7644f1388332ac14ee96` |
 
 Move entry points:
@@ -73,7 +74,7 @@ VITE_SUI_RPC_URL=https://fullnode.testnet.sui.io:443
 VITE_WALRUS_PUBLISHER=https://publisher.walrus-testnet.walrus.space
 VITE_WALRUS_AGGREGATOR=https://aggregator.walrus-testnet.walrus.space
 VITE_WALRUS_EPOCHS=5
-VITE_TUSKD_PACKAGE_ID=0xdc26470e395245b9957fad832d7daaacecd2ed03b99024b4e566917cfdbb3058
+VITE_TUSKD_PACKAGE_ID=0x711e91d13199b760cf674ba44203eda6ebc09b00f82aeb040340a266e4a85270
 VITE_TUSKD_TYPE_PACKAGE_ID=0xdc26470e395245b9957fad832d7daaacecd2ed03b99024b4e566917cfdbb3058
 VITE_TUSKD_ONCHAIN_ADMINS=true
 ```
