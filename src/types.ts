@@ -22,6 +22,7 @@ export type FormSchema = {
   title: string;
   description: string;
   layout?: "standard" | "slides";
+  admins?: string[];
   createdAt: string;
   fields: Field[];
 };
@@ -40,6 +41,7 @@ export type BlobReceipt = {
 export type PublishedForm = {
   id: string;
   owner: string;
+  admins?: string[];
   network: "sui-testnet";
   schemaBlob: BlobReceipt;
   schema: FormSchema;
@@ -51,6 +53,7 @@ export type PublishedForm = {
 export type StoredForm = {
   id: string;
   owner: string;
+  admins?: string[];
   network: "sui-testnet";
   status: "draft" | "published";
   draftSchema: FormSchema;

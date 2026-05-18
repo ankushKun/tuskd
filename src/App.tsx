@@ -77,11 +77,13 @@ import { TESTNET_CONFIG, testnetTxUrl } from "./config";
 import {
   createDraftForm,
   createDefaultSchema,
+  createWalrusSessionSampleSchema,
   deleteForm,
   getForm,
   getForms,
   getSubmissions,
   id,
+  normalizeAdminAddresses,
   publishStoredForm,
   readJsonBlob,
   saveDraftForm,
@@ -90,6 +92,7 @@ import {
   updateSubmission,
   uploadFile,
   uploadJson,
+  WALRUS_SESSION_SAMPLE_ADMIN,
   walrusJsonReceipt,
 } from "./storage";
 
@@ -166,6 +169,7 @@ function schemaFingerprint(schema: FormSchema) {
     title: schema.title,
     description: schema.description,
     layout: schema.layout,
+    admins: normalizeAdminAddresses(schema.admins),
     fields: schema.fields.map(({ id: fieldId, ...field }) => ({ id: fieldId, ...field })),
   });
 }
@@ -219,6 +223,35 @@ function asMoveString(value: unknown) {
   return asMoveString(fields.contents ?? fields.bytes ?? fields.value);
 }
 
+function asMoveAddressList(value: unknown): string[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return normalizeAdminAddresses(value.map((item) => asMoveString(item) || String(item)));
+  if (typeof value === "object") {
+    const fields = (value as { fields?: Record<string, unknown>; contents?: unknown }).fields;
+    if (fields) return asMoveAddressList(fields.contents ?? fields.value ?? fields.bytes);
+    if ("contents" in value) return asMoveAddressList((value as { contents?: unknown }).contents);
+  }
+  return [];
+}
+
+function schemaAdmins(schema?: FormSchema) {
+  return normalizeAdminAddresses(schema?.admins);
+}
+
+function formAdmins(form?: StoredForm | null) {
+  return normalizeAdminAddresses([...(form?.admins ?? []), ...schemaAdmins(form?.schema), ...schemaAdmins(form?.draftSchema)]);
+}
+
+function canAdministerForm(form: StoredForm, address: string | undefined) {
+  if (!address) return false;
+  const normalized = address.toLowerCase();
+  return form.owner.toLowerCase() === normalized || formAdmins(form).includes(normalized);
+}
+
+function parseAdminInput(value: string) {
+  return normalizeAdminAddresses(value.split(/[\s,]+/));
+}
+
 async function fetchPublishedFormFromSui(formObjectId: string, suiClient: ReturnType<typeof useSuiClient>): Promise<StoredForm> {
   const response = await suiClient.getObject({
     id: formObjectId,
@@ -240,20 +273,35 @@ async function fetchPublishedFormFromSui(formObjectId: string, suiClient: Return
 
   const schemaBlob = walrusJsonReceipt(schemaBlobId);
   const schema = await readJsonBlob<FormSchema>(schemaBlob);
+  const admins = asMoveAddressList(fields.admins);
   const now = new Date().toISOString();
   return {
     id: formObjectId,
     owner: asMoveString(fields.owner) || "",
+    admins,
     network: "sui-testnet",
     status: "published",
-    draftSchema: schema,
-    schema,
+    draftSchema: { ...schema, admins: schemaAdmins(schema).length ? schemaAdmins(schema) : admins },
+    schema: { ...schema, admins: schemaAdmins(schema).length ? schemaAdmins(schema) : admins },
     schemaBlob,
     suiObjectId: formObjectId,
     createdAt: schema.createdAt || now,
     updatedAt: now,
     publishedAt: schema.createdAt || now,
   };
+}
+
+async function isCurrentPackageFormObject(formObjectId: string, suiClient: ReturnType<typeof useSuiClient>) {
+  const response = await suiClient.getObject({
+    id: formObjectId,
+    options: { showContent: true },
+  });
+  const content = response.data?.content;
+  return Boolean(
+    content &&
+      content.dataType === "moveObject" &&
+      content.type.toLowerCase() === contractTypeTarget("Form").toLowerCase(),
+  );
 }
 
 function findCreatedFormObjectIds(tx: unknown) {
@@ -1363,6 +1411,15 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
     navigate(`/builder/${form.id}`);
   }
 
+  function newSampleForm() {
+    if (!account?.address) {
+      toast.error("Connect your wallet to create the sample form.");
+      return;
+    }
+    const form = createDraftForm(createWalrusSessionSampleSchema(), account.address);
+    navigate(`/builder/${form.id}`);
+  }
+
   function copyFormLink(form: StoredForm) {
     if (form.status !== "published") return;
     copy(`${window.location.origin}${publicFormPath(form)}`);
@@ -1386,10 +1443,16 @@ function FormsHome({ navigate }: { navigate: (path: string) => void }) {
           <h1>Your forms</h1>
           <p className="muted">{syncingForms ? "Syncing forms from Sui..." : "Create, publish, and manage feedback forms on Walrus."}</p>
         </div>
-        <button className="primary" onClick={newForm}>
-          <Plus size={16} />
-          New form
-        </button>
+        <div className="forms-home-actions">
+          <button className="secondary" onClick={newSampleForm}>
+            <LayoutTemplate size={16} />
+            Sample form
+          </button>
+          <button className="primary" onClick={newForm}>
+            <Plus size={16} />
+            New form
+          </button>
+        </div>
       </div>
 
       {forms.length > 0 && (
@@ -1572,6 +1635,7 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
   const [busy, setBusy] = useState(false);
   const [activeTab, setActiveTab] = useState<"build" | "settings" | "preview">("build");
   const [copied, setCopied] = useState(false);
+  const [adminInput, setAdminInput] = useState(() => schemaAdmins(schema).join("\n"));
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [addModalIndex, setAddModalIndex] = useState(0);
   const [mobileEditorOpen, setMobileEditorOpen] = useState(false);
@@ -1622,6 +1686,7 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
       const draft = createDraftForm(undefined, account.address);
       setForm(draft);
       setSchema(draft.draftSchema);
+      setAdminInput(schemaAdmins(draft.draftSchema).join("\n"));
       setSelectedId(draft.draftSchema.fields[0]?.id ?? "");
       navigate(`/builder/${draft.id}`);
       return;
@@ -1630,6 +1695,7 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
     if (existing) {
       setForm(existing);
       setSchema(existing.draftSchema);
+      setAdminInput(schemaAdmins(existing.draftSchema).join("\n"));
       setSelectedId(existing.draftSchema.fields[0]?.id ?? "");
       return;
     }
@@ -1641,6 +1707,7 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
     const draft = createDraftForm(undefined, account.address);
     setForm(draft);
     setSchema(draft.draftSchema);
+    setAdminInput(schemaAdmins(draft.draftSchema).join("\n"));
     setSelectedId(draft.draftSchema.fields[0]?.id ?? "");
     navigate(`/builder/${draft.id}`);
   }, [formId]);
@@ -1747,6 +1814,7 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
     const confirmed = window.confirm("Discard unpublished edits and restore the currently published version?");
     if (!confirmed) return;
     setSchema(form.schema);
+    setAdminInput(schemaAdmins(form.schema).join("\n"));
     setSelectedId((current) => form.schema?.fields.some((field) => field.id === current) ? current : form.schema?.fields[0]?.id ?? "");
     setScrollTargetId("");
     setForm(saveDraftForm(form.id, form.schema, form.owner));
@@ -1768,9 +1836,17 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
       if (!canUseWallet) return;
       const owner = account.address;
       const current = form ?? createDraftForm(schema, owner);
-      const existingObjectId = current.status === "published" ? formObjectId(current) : "";
-      const shouldUpdate = Boolean(existingObjectId);
-      if (shouldUpdate && current.owner && current.owner.toLowerCase() !== owner.toLowerCase()) {
+      let existingObjectId = current.status === "published" ? formObjectId(current) : "";
+      let shouldUpdate = Boolean(existingObjectId);
+      if (existingObjectId && !(await isCurrentPackageFormObject(existingObjectId, suiClient))) {
+        existingObjectId = "";
+        shouldUpdate = false;
+      }
+      if (shouldUpdate && TESTNET_CONFIG.onchainAdmins && !canAdministerForm(current, owner)) {
+        toast.error("Connect the form owner or an admin wallet to update this published form.");
+        return;
+      }
+      if (shouldUpdate && !TESTNET_CONFIG.onchainAdmins && current.owner && current.owner.toLowerCase() !== owner.toLowerCase()) {
         toast.error("Connect the form owner wallet to update this published form.");
         return;
       }
@@ -1779,29 +1855,35 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
       const now = new Date().toISOString();
       const nextSchema = {
         ...schema,
+        admins: schemaAdmins(schema),
         id: current.schema?.id ?? current.draftSchema.id ?? schema.id ?? id("schema"),
         createdAt: current.schema?.createdAt ?? current.draftSchema.createdAt ?? schema.createdAt ?? now,
       };
       const schemaBlob = await uploadJson(nextSchema, "form-schema.json");
+      const admins = schemaAdmins(nextSchema);
       const tx = new Transaction();
       if (shouldUpdate) {
+        const args = [
+          tx.object(existingObjectId),
+          tx.pure.string(nextSchema.title),
+          tx.pure.string(nextSchema.description),
+          tx.pure.string(schemaBlob.id),
+        ];
+        if (TESTNET_CONFIG.onchainAdmins) args.push(tx.pure.vector("address", admins));
         tx.moveCall({
           target: contractTarget("update_form"),
-          arguments: [
-            tx.object(existingObjectId),
-            tx.pure.string(nextSchema.title),
-            tx.pure.string(nextSchema.description),
-            tx.pure.string(schemaBlob.id),
-          ],
+          arguments: args,
         });
       } else {
+        const args = [
+          tx.pure.string(nextSchema.title),
+          tx.pure.string(nextSchema.description),
+          tx.pure.string(schemaBlob.id),
+        ];
+        if (TESTNET_CONFIG.onchainAdmins) args.push(tx.pure.vector("address", admins));
         tx.moveCall({
           target: contractTarget("create_form"),
-          arguments: [
-            tx.pure.string(nextSchema.title),
-            tx.pure.string(nextSchema.description),
-            tx.pure.string(schemaBlob.id),
-          ],
+          arguments: args,
         });
       }
       const txResult = await signAndExecute.mutateAsync({ transaction: tx, chain: SUI_TESTNET_CHAIN });
@@ -1955,6 +2037,29 @@ function Builder({ formId, navigate }: { formId?: string; navigate: (path: strin
                     <strong>Slides</strong>
                     <span>One question at a time</span>
                   </button>
+                </div>
+              </div>
+
+              <div className="settings-card">
+                <p className="eyebrow">Access</p>
+                <h2>Admins</h2>
+                <p className="settings-copy">Admins can open the response dashboard and sign status or priority updates. Put one Sui address per line.</p>
+                <textarea
+                  className="admin-addresses-input"
+                  value={adminInput}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setAdminInput(value);
+                    setSchema((current) => ({ ...current, admins: parseAdminInput(value) }));
+                  }}
+                  placeholder={WALRUS_SESSION_SAMPLE_ADMIN}
+                />
+                <div className="admin-address-list">
+                  {schemaAdmins(schema).length ? (
+                    schemaAdmins(schema).map((admin) => <code key={admin}>{shortAddress(admin)}</code>)
+                  ) : (
+                    <span>No extra admins</span>
+                  )}
                 </div>
               </div>
 
@@ -3192,6 +3297,8 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
 
   const activeForm = form;
   const adminSchema = activeForm.schema ?? activeForm.draftSchema;
+  const canReview = canAdministerForm(activeForm, account?.address);
+  const canWriteReview = canReview && (TESTNET_CONFIG.onchainAdmins || activeForm.owner.toLowerCase() === account?.address?.toLowerCase());
   const hasArchivedAnswers = submissions.some((submission) => archivedAnswerFields(activeForm, adminSchema, submission).length > 0);
 
   if (activeForm.status !== "published" || !activeForm.schema) {
@@ -3230,7 +3337,15 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
 
   async function saveReviewChanges() {
     if (!account?.address) {
-      toast.error("Connect the form owner wallet to update response status.");
+      toast.error("Connect the form owner or an admin wallet to update response status.");
+      return;
+    }
+    if (!canAdministerForm(activeForm, account.address)) {
+      toast.error("This wallet is not listed as a form admin.");
+      return;
+    }
+    if (!TESTNET_CONFIG.onchainAdmins && activeForm.owner.toLowerCase() !== account.address.toLowerCase()) {
+      toast.error("Admin review updates need the upgraded on-chain admin package. This wallet can view responses, but only the owner can save status changes on the current package.");
       return;
     }
     if (!pendingReviewUpdates.length) return;
@@ -3449,7 +3564,7 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
             <button className="secondary" onClick={cancelReviewChanges} disabled={savingReviewChanges}>
               Cancel
             </button>
-            <button className="primary" onClick={saveReviewChanges} disabled={savingReviewChanges}>
+            <button className="primary" onClick={saveReviewChanges} disabled={savingReviewChanges || !canWriteReview}>
               {savingReviewChanges ? <Loader2 size={15} className="spin" /> : <Check size={15} />}
               Save changes
             </button>
@@ -3501,10 +3616,10 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
                       <div className="cell-time">{new Date(submission.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
                     </td>
                     <td>
-                      <StatusBadge value={submission.status} pending={Boolean(pendingReviewPatches[submission.id]?.status)} disabled={savingReviewChanges} onChange={(v) => queueReviewPatch(submission.id, { status: v as Submission["status"] })} />
+                      <StatusBadge value={submission.status} pending={Boolean(pendingReviewPatches[submission.id]?.status)} disabled={savingReviewChanges || !canWriteReview} onChange={(v) => queueReviewPatch(submission.id, { status: v as Submission["status"] })} />
                     </td>
                     <td>
-                      <PriorityBadge value={submission.priority} pending={Boolean(pendingReviewPatches[submission.id]?.priority)} disabled={savingReviewChanges} onChange={(v) => queueReviewPatch(submission.id, { priority: v as Submission["priority"] })} />
+                      <PriorityBadge value={submission.priority} pending={Boolean(pendingReviewPatches[submission.id]?.priority)} disabled={savingReviewChanges || !canWriteReview} onChange={(v) => queueReviewPatch(submission.id, { priority: v as Submission["priority"] })} />
                     </td>
                     {adminSchema.fields.slice(0, 4).map((field) => (
                       <td key={field.id}>
@@ -3548,8 +3663,8 @@ function Dashboard({ formId, navigate }: { formId: string; navigate: (path: stri
                     {new Date(submission.createdAt).toLocaleString()}
                   </div>
                   <div className="submission-card-badges">
-                    <StatusBadge value={submission.status} pending={Boolean(pendingReviewPatches[submission.id]?.status)} disabled={savingReviewChanges} onChange={(v) => queueReviewPatch(submission.id, { status: v as Submission["status"] })} />
-                    <PriorityBadge value={submission.priority} pending={Boolean(pendingReviewPatches[submission.id]?.priority)} disabled={savingReviewChanges} onChange={(v) => queueReviewPatch(submission.id, { priority: v as Submission["priority"] })} />
+                    <StatusBadge value={submission.status} pending={Boolean(pendingReviewPatches[submission.id]?.status)} disabled={savingReviewChanges || !canWriteReview} onChange={(v) => queueReviewPatch(submission.id, { status: v as Submission["status"] })} />
+                    <PriorityBadge value={submission.priority} pending={Boolean(pendingReviewPatches[submission.id]?.priority)} disabled={savingReviewChanges || !canWriteReview} onChange={(v) => queueReviewPatch(submission.id, { priority: v as Submission["priority"] })} />
                   </div>
                 </div>
                 <div className="submission-card-body">

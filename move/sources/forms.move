@@ -1,5 +1,6 @@
 module tuskd::forms {
     use std::string::String;
+    use std::vector;
     use sui::event;
 
     const E_NOT_OWNER: u64 = 1;
@@ -10,6 +11,7 @@ module tuskd::forms {
         title: String,
         description: String,
         schema_blob_id: String,
+        admins: vector<address>,
         submission_count: u64,
     }
 
@@ -40,6 +42,7 @@ module tuskd::forms {
         title: String,
         description: String,
         schema_blob_id: String,
+        admins: vector<address>,
         ctx: &mut TxContext,
     ) {
         let form = Form {
@@ -48,6 +51,7 @@ module tuskd::forms {
             title,
             description,
             schema_blob_id,
+            admins,
             submission_count: 0,
         };
 
@@ -59,14 +63,16 @@ module tuskd::forms {
         title: String,
         description: String,
         schema_blob_id: String,
+        admins: vector<address>,
         ctx: &TxContext,
     ) {
         let sender = tx_context::sender(ctx);
-        assert!(form.owner == sender, E_NOT_OWNER);
+        assert!(is_owner_or_admin(form, sender), E_NOT_OWNER);
 
         form.title = title;
         form.description = description;
         form.schema_blob_id = schema_blob_id;
+        form.admins = admins;
 
         event::emit(FormUpdatedEvent {
             form_id: object::id(form),
@@ -100,7 +106,7 @@ module tuskd::forms {
         priority: u8,
         ctx: &TxContext,
     ) {
-        assert!(form.owner == tx_context::sender(ctx), E_NOT_OWNER);
+        assert!(is_owner_or_admin(form, tx_context::sender(ctx)), E_NOT_OWNER);
         event::emit(StatusEvent {
             form_id: object::id(form),
             submission_id,
@@ -117,7 +123,15 @@ module tuskd::forms {
         &form.schema_blob_id
     }
 
+    public fun admins(form: &Form): &vector<address> {
+        &form.admins
+    }
+
     public fun submission_count(form: &Form): u64 {
         form.submission_count
+    }
+
+    fun is_owner_or_admin(form: &Form, sender: address): bool {
+        form.owner == sender || vector::contains(&form.admins, &sender)
     }
 }

@@ -6,6 +6,7 @@ export const TESTNET_CONFIG = {
   walrusEpochs: import.meta.env.VITE_WALRUS_EPOCHS || "5",
   tuskdPackageId: import.meta.env.VITE_TUSKD_PACKAGE_ID || "",
   tuskdTypePackageId: import.meta.env.VITE_TUSKD_TYPE_PACKAGE_ID || import.meta.env.VITE_TUSKD_PACKAGE_ID || "",
+  onchainAdmins: import.meta.env.VITE_TUSKD_ONCHAIN_ADMINS === "true",
 } as const;
 
 export function testnetTxUrl(digest: string) {

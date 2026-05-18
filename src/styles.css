@@ -1838,6 +1838,47 @@ code {
   font-size: 18px;
   font-weight: 700;
 }
+.settings-copy {
+  margin: -2px 0 2px;
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.admin-addresses-input {
+  width: 100%;
+  min-height: 104px;
+  resize: vertical;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  outline: none;
+}
+.admin-addresses-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--bg-accent);
+}
+.admin-address-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 28px;
+  align-items: center;
+}
+.admin-address-list code,
+.admin-address-list span {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.admin-address-list code {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-muted);
+  color: var(--fg);
+}
 .settings-toggle {
   display: flex;
   align-items: center;
@@ -2761,6 +2802,12 @@ h2 {
 .forms-home-header p {
   margin: 0;
   font-size: 15px;
+}
+.forms-home-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .forms-stats {
